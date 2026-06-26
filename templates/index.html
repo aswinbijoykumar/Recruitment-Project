@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HR Operations System — JD Generator</title>
+    <meta name="description" content="Automated recruitment operations system for generating enterprise job descriptions using AI.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <!-- Animated background particles -->
+    <div class="bg-particles" aria-hidden="true">
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+    </div>
+
+    <!-- Top nav bar -->
+    <nav class="top-bar" id="topBar">
+        <div class="top-bar-inner">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">RecruitOps</span>
+            </div>
+            <div class="nav-status">
+                <span class="status-dot" id="statusDot"></span>
+                <span class="status-label" id="statusLabel">System Ready</span>
+            </div>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <div class="container" id="mainContainer">
+            <!-- Hero header -->
+            <header class="hero-header">
+                <h1>Job Description Generator</h1>
+                <p class="subtitle">Paste raw client conversations or requirements below — the AI model will compile a structured, enterprise-grade job description in real time.</p>
+            </header>
+
+            <!-- Input section -->
+            <section class="input-section">
+                <label for="clientDemands">
+                    <span class="label-icon">📋</span>
+                    Client Input Profile &amp; Requirements
+                </label>
+                <div class="textarea-wrapper">
+                    <textarea id="clientDemands" placeholder="e.g. We need a senior full-stack developer with 5+ years experience in React and Node.js, familiar with AWS, for our fintech product team based in Bangalore..." rows="6"></textarea>
+                    <span class="char-count" id="charCount">0 characters</span>
+                </div>
+
+                <button id="generateBtn" onclick="submitClientDemands()">
+                    <span class="btn-text">Compile Job Description</span>
+                    <span class="btn-icon">→</span>
+                    <span class="btn-loader" id="btnLoader">
+                        <span class="spinner"></span>
+                        Processing…
+                    </span>
+                </button>
+            </section>
+
+            <!-- Output section -->
+            <section id="outputContainer" class="output-section">
+                <div class="output-header">
+                    <h2>
+                        <span class="output-icon">📄</span>
+                        Compiled Job Description
+                    </h2>
+                    <button class="copy-btn" id="copyBtn" onclick="copyOutput()" title="Copy to clipboard">
+                        <span id="copyIcon">📋</span>
+                        <span id="copyLabel">Copy</span>
+                    </button>
+                </div>
+                <div class="output-body">
+                    <pre id="jdOutput"></pre>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>RecruitOps &middot; AI-Powered Recruitment Automation &middot; Internal Prototype</p>
+    </footer>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
