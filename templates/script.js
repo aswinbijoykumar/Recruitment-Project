@@ -51,65 +51,47 @@ async function submitClientDemands() {
     const outputContainer = document.getElementById("outputContainer");
     const outputWindow = document.getElementById("jdOutput");
     const actionButton = document.getElementById("generateBtn");
-    const engineSelect = document.getElementById("engineSelect");
 
     const textValue = inputField.value.trim();
+
     if (!textValue) {
-        // Briefly shake the textarea to indicate empty input
-        inputField.style.animation = "none";
-        inputField.offsetHeight; // trigger reflow
-        inputField.style.animation = "shake 0.4s ease";
-        setTimeout(() => { inputField.style.animation = "none"; }, 500);
+        alert("Error: Input window cannot be submitted empty.");
         return;
     }
 
-    // Configure UI for processing state
     actionButton.disabled = true;
-    actionButton.classList.add("loading");
-    outputWindow.innerText = "";
-    outputContainer.classList.add("visible");
-    setStatus("processing", "Generating…");
+    actionButton.innerText = "Processing Pipeline...";
+    outputWindow.innerText = ""; 
+    outputContainer.style.display = "block";
 
     try {
+        // Send clean payload with only the required client demands text string
         const response = await fetch('/api/generate-jd', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                demands: textValue,
-                engine: engineSelect.value 
-            })
+            body: JSON.stringify({ demands: textValue }) // Dropped engine property
         });
 
         if (!response.ok) {
-            throw new Error(`Server responded with status ${response.status}`);
+            throw new Error("API communication pipeline broke or returned an error status.");
         }
 
-        // Stream tokens from the response body
         const reader = response.body.getReader();
         const textDecoder = new TextDecoder("utf-8");
 
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
+            
             const textToken = textDecoder.decode(value);
             outputWindow.innerText += textToken;
-
-            // Auto-scroll to the bottom as tokens arrive
-            outputWindow.scrollTop = outputWindow.scrollHeight;
         }
 
-        setStatus("ready", "Generation Complete");
-        // After 4 seconds, revert to idle status
-        setTimeout(() => setStatus("ready", "System Ready"), 4000);
-
     } catch (error) {
-        outputWindow.innerText = `⚠ Generation failed.\n\nDetails: ${error.message}\n\nPlease check that Ollama is running and the jd-generator model is available.`;
-        setStatus("error", "Error Occurred");
-        setTimeout(() => setStatus("ready", "System Ready"), 6000);
+        outputWindow.innerText = `[CRITICAL ERROR] Execution pipeline failed. Details: ${error.message}`;
     } finally {
         actionButton.disabled = false;
-        actionButton.classList.remove("loading");
+        actionButton.innerText = "Compile Job Description";
     }
 }
 
