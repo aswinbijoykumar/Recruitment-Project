@@ -83,7 +83,7 @@ async def generate_jd_stream(payload: DemandPayload):
             elif payload.engine == "cloud-groq":
                 # Ensure you initialized `groq_client = Groq()` at the top of your main.py
                 groq_stream = groq_client.chat.completions.create(
-                    model="llama3-8b-8192",  # Blistering fast Llama 3 cloud instance
+                    model="llama-3.1-8b-instant",  # Blistering fast Llama 3 cloud instance
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": payload.demands}
