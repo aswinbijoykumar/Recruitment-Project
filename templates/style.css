@@ -241,11 +241,55 @@ label {
     font-size: 14px;
     font-weight: 600;
     color: var(--text-secondary);
-    margin-bottom: 12px;
+    margin-bottom: 0; /* overridden by input-header */
 }
 
 .label-icon {
     font-size: 16px;
+}
+
+.input-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.engine-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    transition: border-color var(--transition);
+}
+
+.engine-selector:focus-within {
+    border-color: var(--border-focus);
+}
+
+.engine-icon {
+    font-size: 13px;
+}
+
+.engine-dropdown {
+    background: transparent;
+    color: var(--text-primary);
+    border: none;
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    padding-right: 12px;
+}
+
+.engine-dropdown option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 .textarea-wrapper {

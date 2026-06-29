@@ -51,6 +51,7 @@ async function submitClientDemands() {
     const outputContainer = document.getElementById("outputContainer");
     const outputWindow = document.getElementById("jdOutput");
     const actionButton = document.getElementById("generateBtn");
+    const engineSelect = document.getElementById("engineSelect");
 
     const textValue = inputField.value.trim();
     if (!textValue) {
@@ -73,7 +74,10 @@ async function submitClientDemands() {
         const response = await fetch('/api/generate-jd', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ demands: textValue })
+            body: JSON.stringify({ 
+                demands: textValue,
+                engine: engineSelect.value 
+            })
         });
 
         if (!response.ok) {
