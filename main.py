@@ -1,74 +1,120 @@
 import os
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from groq import Groq
+from groq import AsyncGroq
 from dotenv import load_dotenv
 
-# 1. Load environment variables (.env locally, or Environment Variables tab on Render)
+from services.resume_parser import extract_resume_text
+from services.jd_generator  import stream_jd_generation, stream_resume_analysis
+from services.database       import init_db, save_jd, list_jds, get_jd, delete_jd, extract_keywords
+
 load_dotenv()
+groq_client = AsyncGroq()
 
-# 2. Instantiate global authenticated Groq Cloud client
-groq_client = Groq()
+app = FastAPI(title="Protiviti HR Automation API")
 
-app = FastAPI(title="HR Automation Platform API")
+# Initialise SQLite on startup
+init_db()
 
-# 3. Streamlined Pydantic data contract (Removed the 'engine' attribute)
+
+# ── Data Models ───────────────────────────────────────────────────────────────
 class DemandPayload(BaseModel):
     demands: str
 
-SYSTEM_PROMPT = """You are an expert HR and Technical Recruiter. Your sole task is to generate professional, well-structured Job Descriptions (JDs) based on client demands. 
+class SaveJDPayload(BaseModel):
+    demands: str
+    jd_text: str
 
-When the user gives you demands, immediately output a JD with these sections:
-1. Job Title (extrapolated from demands)
-2. Role Overview
-3. Key Responsibilities (bullet points)
-4. Required Skills & Qualifications (must-haves vs nice-to-haves)
-5. Preferred Experience
 
-Keep the tone professional, attractive to candidates, and highly organized. Do not add conversational filler before or after the JD."""
-
+# ── Frontend ──────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
-    """Serves the main recruitment HTML interface directly to the user's browser."""
     html_path = os.path.join("templates", "index.html")
     if not os.path.exists(html_path):
-        raise HTTPException(status_code=404, detail="Frontend template index.html not found.")
-    with open(html_path, "r", encoding="utf-8") as file:
-        return file.read()
+        raise HTTPException(status_code=404, detail="Frontend template not found.")
+    with open(html_path, "r", encoding="utf-8") as f:
+        return f.read()
 
+
+# ── JD Generation ─────────────────────────────────────────────────────────────
 @app.post("/api/generate-jd")
 async def generate_jd_stream(payload: DemandPayload):
-    """API endpoint that directly streams text tokens from Groq Cloud using Llama 3."""
     if not payload.demands.strip():
-        raise HTTPException(status_code=400, detail="Demand input text cannot be empty.")
-        
-    def stream_generator():
+        raise HTTPException(status_code=400, detail="Input cannot be empty.")
+
+    async def stream_generator():
         try:
-            # Directly call Groq Cloud API instance with streaming enabled
-            groq_stream = groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",  
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": payload.demands}
-                ],
-                stream=True,
-            )
-            for chunk in groq_stream:
-                token = chunk.choices[0].delta.content
-                if token:
-                    yield token
-            
-        except Exception as api_error:
-            yield f"\n[System Error: Unable to compute model stream. {str(api_error)}]"
+            async for token in stream_jd_generation(groq_client, payload.demands):
+                yield token.encode("utf-8")
+        except Exception as e:
+            yield f"\n[Error] {str(e)}".encode("utf-8")
 
-    return StreamingResponse(stream_generator(), media_type="text/plain")
+    return StreamingResponse(stream_generator(), media_type="text/plain; charset=utf-8")
 
-# Serve static assets (CSS, JS) if you use separate files inside the templates directory
+
+# ── Save JD ───────────────────────────────────────────────────────────────────
+@app.post("/api/save-jd")
+async def api_save_jd(payload: SaveJDPayload):
+    if not payload.jd_text.strip():
+        raise HTTPException(status_code=400, detail="JD text is empty.")
+
+    keywords = extract_keywords(payload.demands, payload.jd_text)
+    title    = keywords[0] if keywords else "Saved JD"
+
+    jd_id = save_jd(title, payload.demands, payload.jd_text, keywords)
+    return JSONResponse({"id": jd_id, "title": title, "keywords": keywords})
+
+
+# ── List Saved JDs ────────────────────────────────────────────────────────────
+@app.get("/api/saved-jds")
+async def api_list_jds():
+    return JSONResponse(list_jds())
+
+
+# ── Get Single Saved JD ───────────────────────────────────────────────────────
+@app.get("/api/saved-jds/{jd_id}")
+async def api_get_jd(jd_id: int):
+    jd = get_jd(jd_id)
+    if not jd:
+        raise HTTPException(status_code=404, detail="JD not found.")
+    return JSONResponse(jd)
+
+
+# ── Delete Saved JD ───────────────────────────────────────────────────────────
+@app.delete("/api/saved-jds/{jd_id}")
+async def api_delete_jd(jd_id: int):
+    if not delete_jd(jd_id):
+        raise HTTPException(status_code=404, detail="JD not found.")
+    return JSONResponse({"ok": True})
+
+
+# ── Resume Analysis ───────────────────────────────────────────────────────────
+@app.post("/api/analyze-resume")
+async def analyze_resume(jd_text: str = Form(...), resume_file: UploadFile = File(...)):
+    file_bytes = await resume_file.read()
+    try:
+        resume_text = extract_resume_text(file_bytes, resume_file.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not resume_text:
+        raise HTTPException(status_code=400, detail="Could not extract text from resume.")
+
+    async def stream_generator():
+        try:
+            async for token in stream_resume_analysis(groq_client, jd_text, resume_text):
+                yield token.encode("utf-8")
+        except Exception as e:
+            yield f"\n[Error during analysis: {str(e)}]".encode("utf-8")
+
+    return StreamingResponse(stream_generator(), media_type="text/plain; charset=utf-8")
+
+
+# ── Static files ──────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory="templates"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    # Start the server locally on Port 8000
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

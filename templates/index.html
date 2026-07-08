@@ -3,93 +3,247 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HR Operations System — JD Generator</title>
-    <meta name="description" content="Automated recruitment operations system for generating enterprise job descriptions using AI.">
+    <title>Protiviti | HR Automation — JD Generator</title>
+    <meta name="description" content="Protiviti HR Automation Platform — AI-powered Job Description Generator.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-    <!-- Animated background particles -->
-    <div class="bg-particles" aria-hidden="true">
-        <div class="particle"></div>
-        <div class="particle"></div>
-        <div class="particle"></div>
-        <div class="particle"></div>
-        <div class="particle"></div>
-        <div class="particle"></div>
-    </div>
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar" id="sidebar">
 
-    <!-- Top nav bar -->    
-    <nav class="top-bar" id="topBar">
-        <div class="top-bar-inner">
-            <div class="logo">
-                <span class="logo-icon">⚡</span>
-                <span class="logo-text">RecruitOps</span>
-            </div>
-            <div class="nav-status">
-                <span class="status-dot" id="statusDot"></span>
-                <span class="status-label" id="statusLabel">System Ready</span>
+        <!-- Sidebar Header: Logo -->
+        <div class="sidebar-header">
+            <img
+                src="https://www.protiviti.com/themes/custom/protiviti/components/source/images/logo/gl-en.svg"
+                alt="Protiviti"
+                class="sidebar-logo"
+                onerror="this.style.display='none'; document.getElementById('logoFb').style.display='block';"
+            />
+            <span id="logoFb" class="sidebar-logo-fallback" style="display:none;">protiviti<sup>®</sup></span>
+        </div>
+
+        <!-- New Analysis Button -->
+        <button class="new-chat-btn" id="newChatBtn" onclick="newChat()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Analysis
+        </button>
+
+        <!-- Saved JDs Section -->
+        <div class="sidebar-section-label">SAVED JOB DESCRIPTIONS</div>
+
+        <!-- Saved JD list (populated by JS) -->
+        <div class="saved-jd-list" id="savedJdList">
+            <!-- Empty state shown until JDs are loaded -->
+            <div class="saved-jd-empty" id="savedJdEmpty">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span>No saved JDs yet.<br>Generate and save your first one.</span>
             </div>
         </div>
-    </nav>
 
-    <main class="main-content">
-        <div class="container" id="mainContainer">
-            <!-- Hero header -->
-            <header class="hero-header">
-                <h1>Job Description Generator</h1>
-                <p class="subtitle">Paste raw client conversations or requirements below — the AI model will compile a structured, enterprise-grade job description in real time.</p>
-            </header>
-
-            <!-- Input section -->
-            <section class="input-section">
-                <div class="input-header">
-                    <label for="clientDemands">
-                        <span class="label-icon">📋</span>
-                        Client Input Profile &amp; Requirements
-                    </label>
+        <!-- Sidebar Footer: Status -->
+        <div class="sidebar-footer">
+            <div class="status-row">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusLabel">System Ready</span>
+            </div>
+            <div class="stats-row">
+                <div class="stat-item">
+                    <span class="stat-label">Tokens</span>
+                    <span class="stat-value" id="tokenCount">—</span>
                 </div>
-                <div class="textarea-wrapper">
-                    <textarea id="clientDemands" placeholder="e.g. We need a senior full-stack developer with 5+ years experience in React and Node.js, familiar with AWS, for our fintech product team based in Bangalore..." rows="6"></textarea>
-                    <span class="char-count" id="charCount">0 characters</span>
+                <div class="stat-item">
+                    <span class="stat-label">Time</span>
+                    <span class="stat-value" id="timeCount">—</span>
                 </div>
+            </div>
+        </div>
 
-                <button id="generateBtn" onclick="submitClientDemands()">
-                    <span class="btn-text">Compile Job Description</span>
-                    <span class="btn-icon">→</span>
-                    <span class="btn-loader" id="btnLoader">
-                        <span class="spinner"></span>
-                        Processing…
-                    </span>
+    </aside>
+
+    <!-- ===== MAIN PANEL ===== -->
+    <div class="main-panel">
+
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <div class="top-bar-left">
+                <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" title="Toggle sidebar">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
-            </section>
+                <span class="top-bar-title">Resume Analyser</span>
+            </div>
+            <div class="top-bar-right">
+                <div class="user-chip">
+                    <div class="user-avatar">HR</div>
+                    <span class="user-name">HR Team</span>
+                </div>
+            </div>
+        </header>
 
-            <!-- Output section -->
-            <section id="outputContainer" class="output-section">
-                <div class="output-header">
-                    <h2>
-                        <span class="output-icon">📄</span>
-                        Compiled Job Description
-                    </h2>
-                    <button class="copy-btn" id="copyBtn" onclick="copyOutput()" title="Copy to clipboard">
-                        <span id="copyIcon">📋</span>
-                        <span id="copyLabel">Copy</span>
+        <!-- Scrollable content area -->
+        <div class="content-area" id="contentArea">
+
+            <!-- Hero -->
+            <div class="hero-section">
+                <p class="hero-sub">
+                
+                </p>
+            </div>
+
+            <!-- Input Card -->
+            <div class="card" id="inputCard">
+                <div class="card-header">
+                    <div class="card-header-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </div>
+                    <div>
+                        <div class="card-title">Client Requirements</div>
+                        <div class="card-subtitle">Paste client demands, conversation notes, or a brief</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="textarea-wrapper">
+                        <textarea
+                            id="clientDemands"
+                            placeholder="e.g. We need a Senior Risk Consultant with 6+ years in financial risk management. Must have SOX and Basel III expertise. Based in Mumbai. Open to travel."
+                            rows="7"
+                        ></textarea>
+                        <span class="char-count" id="charCount">0 characters</span>
+                    </div>
+
+                    <button class="generate-btn" id="generateBtn" onclick="submitClientDemands()">
+                        <span class="generate-btn-content">
+                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                            Generate Job Description
+                        </span>
+                        <span class="btn-loader" id="btnLoader">
+                            <span class="spinner"></span>
+                            Generating…
+                        </span>
                     </button>
                 </div>
-                <div class="output-body">
+            </div>
+
+            <!-- Output Card (hidden by default) -->
+            <div class="card output-card" id="outputContainer">
+                <div class="card-header output-card-header">
+                    <div class="card-header-icon output-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    </div>
+                    <div>
+                        <div class="card-title">Generated Job Description</div>
+                        <div class="card-subtitle" id="outputMeta">Ready</div>
+                    </div>
+                    <div class="output-actions">
+                        <button class="action-btn" id="copyBtn" onclick="copyOutput()">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            <span id="copyLabel">Copy</span>
+                        </button>
+                        <button class="action-btn" id="exportBtn" onclick="exportOutput()">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export
+                        </button>
+                        <button class="action-btn save-btn" id="saveJdBtn" onclick="saveJD()">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                            <span id="saveLabel">Save JD</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body output-body">
                     <pre id="jdOutput"></pre>
                 </div>
-            </section>
-        </div>
-    </main>
+            </div>
 
-    <!-- Footer -->
-    <footer class="site-footer">
-        <p>RecruitOps &middot; AI-Powered Recruitment Automation &middot; Internal Prototype</p>
-    </footer>
+            <!-- ===== RESUME ANALYZER CARD ===== -->
+            <div class="card analyzer-card" id="analyzerSection">
+                <div class="card-header">
+                    <div class="card-header-icon analyzer-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    </div>
+                    <div>
+                        <div class="card-title">Resume Analyzer</div>
+                        <div class="card-subtitle">Upload a resume to compare against the generated Job Description</div>
+                    </div>
+                </div>
+                <div class="card-body">
+
+                    <!-- Drag & Drop Zone -->
+                    <div class="drop-zone" id="dropZone">
+                        <input type="file" id="resumeFileInput" accept=".pdf,.txt" style="display:none" />
+                        <div class="drop-zone-icon">
+                            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
+                        <div class="drop-zone-text">
+                            <span class="drop-zone-primary">Drag &amp; drop resume here</span>
+                            <span class="drop-zone-secondary">or click to browse — PDF or TXT supported</span>
+                        </div>
+                        <div class="drop-zone-file-info" id="fileInfo" style="display:none">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                            <span id="fileName">No file selected</span>
+                            <button class="file-remove-btn" id="fileRemoveBtn" title="Remove file">✕</button>
+                        </div>
+                    </div>
+
+                    <!-- Analyze Button -->
+                    <button class="analyze-btn" id="analyzeBtn" onclick="analyzeResume()" disabled>
+                        <span class="analyze-btn-content">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            Analyze Resume Match
+                        </span>
+                        <span class="btn-loader" id="analyzeBtnLoader">
+                            <span class="spinner"></span>
+                            Analyzing…
+                        </span>
+                    </button>
+
+                    <!-- Warning if no JD yet -->
+                    <div class="analyzer-warning" id="analyzerWarning" style="display:none">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        Please generate a Job Description first before analyzing a resume.
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== ANALYSIS RESULT CARD ===== -->
+            <div class="card analysis-result-card" id="analysisResultCard">
+                <div class="card-header output-card-header">
+                    <div class="card-header-icon analysis-result-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    </div>
+                    <div style="flex:1">
+                        <div class="card-title">Match Analysis Report</div>
+                        <div class="card-subtitle" id="analysisMeta">Generated by AI · Protiviti HR Automation</div>
+                    </div>
+                    <div class="output-actions">
+                        <button class="action-btn" id="copyAnalysisBtn" onclick="copyAnalysis()">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            <span id="copyAnalysisLabel">Copy</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body output-body">
+                    <div id="analysisOutput" class="analysis-report"></div>
+                </div>
+            </div>
+
+        </div><!-- /content-area -->
+
+
+        <!-- Footer -->
+        <footer class="bottom-bar">
+            <img
+                src="https://www.protiviti.com/themes/custom/protiviti/components/source/images/logo/gl-en.svg"
+                alt="Protiviti"
+                class="footer-logo"
+                onerror="this.style.display='none';"
+            />
+            <span class="footer-text">&copy; 2026 Protiviti Inc. · HR Automation Platform · Internal Use Only</span>
+        </footer>
+
+    </div><!-- /main-panel -->
 
     <script src="/static/script.js"></script>
 </body>
