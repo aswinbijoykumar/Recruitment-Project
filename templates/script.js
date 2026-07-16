@@ -329,7 +329,8 @@ async function submitClientDemands() {
 // (no inline handlers in HTML to avoid timing errors)
 // =============================================
 
-let selectedResumeFile = null;
+let uploadedResumeFiles = [];
+let batchAnalysisData   = null; // stores the API response data
 
 // Wire up everything once the DOM is ready
 document.addEventListener("DOMContentLoaded", function () {
@@ -337,22 +338,22 @@ document.addEventListener("DOMContentLoaded", function () {
     // Load saved JDs into sidebar on startup
     loadSavedJDs();
 
-    const dropZone       = document.getElementById("dropZone");
-    const fileInput      = document.getElementById("resumeFileInput");
-    const fileRemoveBtn  = document.getElementById("fileRemoveBtn");
+    const dropZone  = document.getElementById("dropZone");
+    const fileInput = document.getElementById("resumeFileInput");
 
     if (!dropZone || !fileInput) return; // guard if elements don't exist
 
-    // Click on the drop zone → open file picker (ignore clicks on the remove button)
+    // Click on the drop zone → open file picker
     dropZone.addEventListener("click", function (e) {
-        if (e.target.closest("#fileRemoveBtn")) return;
+        if (e.target.closest("#filesContainer")) return; // ignore if clicking inside files container
         fileInput.click();
     });
 
-    // File selected via picker
+    // Files selected via picker
     fileInput.addEventListener("change", function (e) {
-        const file = e.target.files[0];
-        if (file) setResumeFile(file);
+        if (e.target.files.length > 0) {
+            addResumeFiles(e.target.files);
+        }
     });
 
     // Drag events
@@ -371,40 +372,71 @@ document.addEventListener("DOMContentLoaded", function () {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.remove("drag-over");
-        const file = e.dataTransfer.files[0];
-        if (file) setResumeFile(file);
+        if (e.dataTransfer.files.length > 0) {
+            addResumeFiles(e.dataTransfer.files);
+        }
     });
-
-    // Remove file button
-    if (fileRemoveBtn) {
-        fileRemoveBtn.addEventListener("click", function (e) {
-            e.stopPropagation();
-            clearFile();
-        });
-    }
 });
 
-function setResumeFile(file) {
+function addResumeFiles(files) {
     const allowed = [".pdf", ".txt"];
-    const ext = "." + file.name.split(".").pop().toLowerCase();
-    if (!allowed.includes(ext)) {
-        alert("Unsupported file type. Please upload a PDF or TXT resume.");
+    
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const ext = "." + file.name.split(".").pop().toLowerCase();
+        
+        if (!allowed.includes(ext)) {
+            alert(`Unsupported file: ${file.name}. Please upload PDF or TXT files.`);
+            continue;
+        }
+        
+        // Avoid duplicate files by name
+        if (!uploadedResumeFiles.some(f => f.name === file.name)) {
+            uploadedResumeFiles.push(file);
+        }
+    }
+    
+    renderFilesList();
+}
+
+function renderFilesList() {
+    const container = document.getElementById("filesContainer");
+    const analyzeBtn = document.getElementById("analyzeBtn");
+    
+    if (uploadedResumeFiles.length === 0) {
+        container.style.display = "none";
+        container.innerHTML = "";
+        analyzeBtn.disabled = true;
         return;
     }
-    selectedResumeFile = file;
-    document.getElementById("fileInfo").style.display = "flex";
-    document.getElementById("fileName").textContent   = file.name;
-    document.getElementById("analyzeBtn").disabled    = false;
+    
+    container.style.display = "grid";
+    container.innerHTML = uploadedResumeFiles.map((file, idx) => `
+        <div class="drop-zone-file-item">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span class="drop-zone-file-name" title="${escHtml(file.name)}">${escHtml(file.name)}</span>
+            <button class="file-remove-btn" onclick="removeUploadedFile(event, ${idx})" title="Remove file">✕</button>
+        </div>
+    `).join("");
+    
+    analyzeBtn.disabled = false;
 }
 
-function clearFile() {
-    selectedResumeFile = null;
-    document.getElementById("fileInfo").style.display   = "none";
-    document.getElementById("resumeFileInput").value    = "";
-    document.getElementById("analyzeBtn").disabled      = true;
+// Global helper for remove file button
+window.removeUploadedFile = function (e, index) {
+    e.stopPropagation();
+    uploadedResumeFiles.splice(index, 1);
+    document.getElementById("resumeFileInput").value = ""; // clear picker value to allow re-selection
+    renderFilesList();
+};
+
+function clearFiles() {
+    uploadedResumeFiles = [];
+    document.getElementById("resumeFileInput").value = "";
+    renderFilesList();
 }
 
-// --- Main Analyze Function ---
+// --- Main Batch Analyze Function ---
 async function analyzeResume() {
     const jdText = document.getElementById("jdOutput").textContent.trim();
 
@@ -415,21 +447,23 @@ async function analyzeResume() {
         return;
     }
 
-    if (!selectedResumeFile) {
-        alert("Please upload a resume file first.");
+    if (uploadedResumeFiles.length === 0) {
+        alert("Please upload at least one resume file first.");
         return;
     }
 
     const analyzeBtn   = document.getElementById("analyzeBtn");
     const resultCard   = document.getElementById("analysisResultCard");
     const analysisOut  = document.getElementById("analysisOutput");
+    const leaderboard  = document.getElementById("leaderboardList");
     const analysisMeta = document.getElementById("analysisMeta");
 
     analyzeBtn.disabled = true;
     analyzeBtn.classList.add("loading");
 
-    // Show streaming placeholder
-    analysisOut.innerHTML = '<div class="analysis-streaming">Analyzing resume against the job description…</div>';
+    // Initialize UI states
+    leaderboard.innerHTML = '<div class="analysis-streaming">Reranking candidates...</div>';
+    analysisOut.innerHTML = '<div class="analysis-streaming">Running batch evaluation against the JD...</div>';
     resultCard.classList.add("visible");
 
     setTimeout(() => {
@@ -440,8 +474,12 @@ async function analyzeResume() {
 
     try {
         const formData = new FormData();
-        formData.append("jd_text",     jdText);
-        formData.append("resume_file", selectedResumeFile, selectedResumeFile.name);
+        formData.append("jd_text", jdText);
+        
+        // Append multiple files under the same "resume_files" key expected by FastAPIs list[UploadFile]
+        uploadedResumeFiles.forEach(file => {
+            formData.append("resume_files", file, file.name);
+        });
 
         const response = await fetch("/api/analyze-resume", {
             method: "POST",
@@ -453,24 +491,17 @@ async function analyzeResume() {
             throw new Error(err.detail || `Server error ${response.status}`);
         }
 
-        // Stream the full text into a buffer
-        const reader      = response.body.getReader();
-        const textDecoder = new TextDecoder("utf-8");
-        let fullText      = "";
+        const data = await response.json();
+        batchAnalysisData = data; // store locally
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            fullText += textDecoder.decode(value, { stream: true });
-        }
-
-        // Render as styled HTML
-        analysisOut.innerHTML = renderAnalysisReport(fullText);
-
+        // Render rankings list and details
+        renderLeaderboard(data);
+        
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        if (analysisMeta) analysisMeta.textContent = `Analysis completed in ${elapsed}s · ${selectedResumeFile.name}`;
+        if (analysisMeta) analysisMeta.textContent = `Completed evaluation of ${uploadedResumeFiles.length} resumes in ${elapsed}s`;
 
     } catch (error) {
+        leaderboard.innerHTML = `<div class="analysis-streaming" style="color:var(--red-err)">Analysis failed.</div>`;
         analysisOut.innerHTML = `<div class="analysis-streaming" style="color:var(--red-err)">[Error] ${error.message}</div>`;
     } finally {
         analyzeBtn.disabled = false;
@@ -478,168 +509,198 @@ async function analyzeResume() {
     }
 }
 
-// --- Analysis Report Renderer ---
-function renderAnalysisReport(rawText) {
-    // Clean up any stray markdown characters
-    const clean = rawText
-        .replace(/#{1,6}\s*/g, "")   // remove ### headings
-        .replace(/\*\*/g, "")         // remove bold **
-        .replace(/\*/g, "")           // remove italic *
-        .replace(/[\u{1F300}-\u{1FFFF}]/gu, "") // remove emojis
-        .trim();
-
-    const lines = clean.split("\n").map(l => l.trimEnd());
-
-    // Detect which section each line belongs to
-    const SECTIONS = {
-        "OVERALL MATCH SCORE": "score",
-        "STRENGTHS":           "strengths",
-        "GAPS":                "gaps",
-        "SECTION ASSESSMENT":  "assessment",
-        "RECOMMENDATION":      "recommendation"
-    };
-
-    let html        = "";
-    let currentSec  = null;
-    let sectionBuf  = [];
-
-    const flushSection = (sec, buf) => {
-        if (!sec || buf.length === 0) return "";
-        const contentLines = buf.filter(l => l.trim() !== "");
-        if (contentLines.length === 0) return "";
-        return buildSectionHTML(sec, contentLines);
-    };
-
-    for (const line of lines) {
-        const upperLine = line.trim().toUpperCase();
-        const secKey    = Object.keys(SECTIONS).find(k => upperLine === k);
-
-        if (secKey) {
-            html       += flushSection(currentSec, sectionBuf);
-            currentSec  = SECTIONS[secKey];
-            sectionBuf  = [];
-        } else {
-            sectionBuf.push(line);
+function renderLeaderboard(data) {
+    const list = document.getElementById("leaderboardList");
+    const ranking = data.ranking || [];
+    
+    if (ranking.length === 0) {
+        list.innerHTML = '<div class="analysis-streaming">No candidates ranked.</div>';
+        return;
+    }
+    
+    list.innerHTML = ranking.map(item => {
+        const name = item.candidate_name;
+        const verdictClass = /strong/i.test(item.verdict) ? "strong" :
+                             /moderate/i.test(item.verdict) ? "moderate" : "weak";
+        const contact = item.contact_info || {};
+        const phone = contact.phone || "Not specified";
+        const email = contact.email || "Not specified";
+        const linkedin = contact.linkedin || "Not specified";
+        
+        // Clean up linkedIn link if it doesn't have http/https prefix
+        let linkedinUrl = linkedin;
+        if (linkedinUrl !== "Not specified" && !linkedinUrl.startsWith("http")) {
+            linkedinUrl = "https://" + linkedinUrl;
         }
-    }
-    html += flushSection(currentSec, sectionBuf);
 
-    return html || `<div class="analysis-streaming">${clean}</div>`;
+        return `
+            <div class="leaderboard-card" data-name="${escHtml(name)}">
+                <div class="leaderboard-rank-badge">${item.rank}</div>
+                <div class="leaderboard-card-info">
+                    <div class="leaderboard-card-name" title="${escHtml(name)}">${escHtml(name)}</div>
+                    <div class="leaderboard-card-score-row">
+                        <span class="leaderboard-card-score">Score: ${item.score}</span>
+                        <span class="leaderboard-card-verdict ${verdictClass}">${escHtml(item.verdict)}</span>
+                    </div>
+                    <div class="leaderboard-card-justification">${escHtml(item.justification)}</div>
+                    
+                    <!-- Contact bar - displays on hover -->
+                    <div class="leaderboard-card-contact">
+                        ${phone !== "Not specified" ? `
+                            <span class="contact-item" title="Call ${escHtml(phone)}">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                                <span>${escHtml(phone)}</span>
+                            </span>
+                        ` : ''}
+                        ${email !== "Not specified" ? `
+                            <span class="contact-item" title="Email ${escHtml(email)}">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                <span>${escHtml(email)}</span>
+                            </span>
+                        ` : ''}
+                        ${linkedin !== "Not specified" ? `
+                            <a href="${escHtml(linkedinUrl)}" target="_blank" class="contact-item link-item" title="Visit LinkedIn Profile" onclick="event.stopPropagation()">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
+                                <span>LinkedIn</span>
+                            </a>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join("");
+    
+    // Wire up active candidate click triggers
+    const cards = list.querySelectorAll(".leaderboard-card");
+    cards.forEach(card => {
+        card.addEventListener("click", () => {
+            cards.forEach(c => c.classList.remove("active"));
+            card.classList.add("active");
+            
+            const name = card.dataset.name;
+            const report = data.reports[name];
+            if (report) {
+                document.getElementById("selectedCandidateHeader").textContent = `Assessment: ${name}`;
+                document.getElementById("analysisOutput").innerHTML = renderDetailedReport(name, report);
+            }
+        });
+    });
+    
+    // Automatically select the first ranked candidate to pre-load details
+    if (cards.length > 0) {
+        cards[0].click();
+    }
 }
 
-function buildSectionHTML(section, lines) {
-    if (section === "score") {
-        return buildScoreHTML(lines);
-    }
-    if (section === "strengths" || section === "gaps") {
-        return buildBulletsHTML(section, lines);
-    }
-    if (section === "assessment") {
-        return buildAssessmentHTML(lines);
-    }
-    if (section === "recommendation") {
-        return buildRecommendationHTML(lines);
-    }
-    return "";
-}
+function renderDetailedReport(candidateName, report) {
+    const score = report.score || 0;
+    const verdict = report.verdict || "Unknown";
+    const verdictReason = report.verdict_reason || "";
+    const verdictClass = /strong/i.test(verdict) ? "strong" :
+                         /moderate/i.test(verdict) ? "moderate" : "weak";
 
-function buildScoreHTML(lines) {
-    let scoreText   = "";
-    let verdictText = "";
-    let summaryText = "";
+    // Extract new profile fields
+    const skillsDomain = report.skills_domain || "Not available";
+    const profilePitch = report.profile_pitch || "Not available";
+    const profileSummary = report.profile_summary || "Not available";
 
-    for (const line of lines) {
-        const l = line.trim();
-        if (!l) continue;
-        if (l.toLowerCase().includes("match score") || l.match(/\d+\s*\/\s*100/)) {
-            scoreText = l.replace(/match score[:\s]*/i, "").trim();
-        } else if (/strong match|moderate match|weak match/i.test(l)) {
-            verdictText = l;
-        } else {
-            summaryText += (summaryText ? " " : "") + l;
-        }
-    }
-
-    const verdictClass = /strong/i.test(verdictText) ? "strong" :
-                         /moderate/i.test(verdictText) ? "moderate" : "weak";
-
-    return `
-    <div class="report-score-banner">
-        <div class="report-score-left">
-            <span class="report-score-label">Match Score</span>
-            <span class="report-score-value">${scoreText || "—"}</span>
-            ${summaryText ? `<span class="report-score-summary">${summaryText}</span>` : ""}
-        </div>
-        <span class="report-verdict ${verdictClass}">${verdictText || "Result"}</span>
-    </div>`;
-}
-
-function buildBulletsHTML(section, lines) {
-    const isStrengths = section === "strengths";
-    const label  = isStrengths ? "Strengths" : "Gaps";
-    const svgIcon = isStrengths
-        ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`
-        : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-
-    const bullets = lines
-        .filter(l => l.trim())
-        .map(l => l.replace(/^[-•]\s*/, "").trim())
-        .filter(Boolean);
-
-    const items = bullets.map(b =>
+    // Strengths list
+    const strengthsHtml = (report.strengths || []).map(s => 
         `<div class="report-bullet">
             <span class="report-bullet-dot"></span>
-            <span class="report-bullet-text">${escHtml(b)}</span>
+            <span class="report-bullet-text">${escHtml(s)}</span>
         </div>`
     ).join("");
 
-    return `
-    <div class="report-section ${section}">
-        <div class="report-section-header">${svgIcon} ${label}</div>
-        <div class="report-section-body">${items}</div>
+    // Gaps list
+    const gapsHtml = (report.gaps || []).map(g => 
+        `<div class="report-bullet">
+            <span class="report-bullet-dot"></span>
+            <span class="report-bullet-text">${escHtml(g)}</span>
+        </div>`
+    ).join("");
+
+    // Section ratings
+    const assessmentHtml = Object.entries(report.assessment || {}).map(([key, val]) => 
+        `<div class="assessment-row">
+            <span class="assessment-key">${escHtml(key)}</span>
+            <span class="assessment-val">${escHtml(val)}</span>
+        </div>`
+    ).join("");
+
+    // Action Toolbar — View Resume, Copy Skills, Copy Pitch, Copy Summary
+    const actionToolbarHtml = `
+    <div class="candidate-action-toolbar">
+        <button class="candidate-action-btn view-resume-btn" onclick="viewResume('${escHtml(candidateName)}')" title="View full extracted resume text">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>View Resume</span>
+        </button>
+        <button class="candidate-action-btn" id="copySkillsBtn_${score}" onclick="copyToClipboardWithFeedback(this, \`${escHtml(skillsDomain).replace(/`/g, '')}\`)" title="Copy skills and domain expertise">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>Copy Skills</span>
+        </button>
+        <button class="candidate-action-btn" onclick="copyToClipboardWithFeedback(this, \`${escHtml(profilePitch).replace(/`/g, '')}\`)" title="Copy 2-3 line email-ready profile pitch">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            <span>Copy Profile Pitch</span>
+        </button>
+        <button class="candidate-action-btn" onclick="copyToClipboardWithFeedback(this, \`${escHtml(profileSummary).replace(/`/g, '')}\`)" title="Copy comprehensive profile summary for Excel/reports">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+            <span>Copy Profile Summary</span>
+        </button>
     </div>`;
-}
 
-function buildAssessmentHTML(lines) {
-    const rows = lines
-        .filter(l => l.includes(":"))
-        .map(l => {
-            const colonIdx = l.indexOf(":");
-            const key = l.slice(0, colonIdx).trim();
-            const val = l.slice(colonIdx + 1).trim();
-            return key && val
-                ? `<div class="assessment-row">
-                    <span class="assessment-key">${escHtml(key)}</span>
-                    <span class="assessment-val">${escHtml(val)}</span>
-                   </div>`
-                : "";
-        }).join("");
-
-    const svgIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`;
     return `
+    ${actionToolbarHtml}
+
+    <div class="report-score-banner">
+        <div class="report-score-left">
+            <span class="report-score-label">Match Score</span>
+            <span class="report-score-value">${score} / 100</span>
+            <span class="report-score-summary">${escHtml(verdictReason)}</span>
+        </div>
+        <span class="report-verdict ${verdictClass}">${escHtml(verdict)}</span>
+    </div>
+    
+    <div class="report-section strengths">
+        <div class="report-section-header">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Strengths
+        </div>
+        <div class="report-section-body">${strengthsHtml || '<div class="report-bullet-text">No significant strengths highlighted.</div>'}</div>
+    </div>
+    
+    <div class="report-section gaps">
+        <div class="report-section-header">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Gaps / Areas of Improvement
+        </div>
+        <div class="report-section-body">${gapsHtml || '<div class="report-bullet-text">No significant gaps identified.</div>'}</div>
+    </div>
+    
     <div class="report-section assessment">
-        <div class="report-section-header">${svgIcon} Section Assessment</div>
-        <div class="report-section-body">${rows}</div>
-    </div>`;
-}
-
-function buildRecommendationHTML(lines) {
-    const text = lines.filter(l => l.trim()).join(" ");
-    const svgIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
-    return `
+        <div class="report-section-header">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Section Assessment
+        </div>
+        <div class="report-section-body">${assessmentHtml}</div>
+    </div>
+    
     <div class="report-section recommendation">
-        <div class="report-section-header">${svgIcon} Recommendation</div>
+        <div class="report-section-header">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Recommendation
+        </div>
         <div class="report-section-body">
-            <p class="report-recommendation-text">${escHtml(text)}</p>
+            <p class="report-recommendation-text">${escHtml(report.recommendation || '')}</p>
         </div>
     </div>`;
 }
 
 function escHtml(str) {
-    return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    return (str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
-// --- Copy Analysis Result ---
+// --- Copy Active Analysis Result ---
 function copyAnalysis() {
     const text = document.getElementById("analysisOutput").textContent;
     if (!text.trim()) return;
@@ -660,6 +721,86 @@ function copyAnalysis() {
         ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
         document.body.appendChild(ta); ta.select();
         document.execCommand("copy"); document.body.removeChild(ta);
+        doSuccess();
+    }
+}
+
+
+// =============================================
+// CANDIDATE PROFILE ACTIONS
+// =============================================
+
+// --- View Resume Modal ---
+function viewResume(candidateName) {
+    if (!batchAnalysisData || !batchAnalysisData.resume_texts) {
+        alert("No resume data available.");
+        return;
+    }
+
+    const resumeText = batchAnalysisData.resume_texts[candidateName];
+    if (!resumeText) {
+        alert("Resume text not found for this candidate.");
+        return;
+    }
+
+    document.getElementById("resumeModalTitle").textContent = `Resume: ${candidateName}`;
+    document.getElementById("resumeModalContent").textContent = resumeText;
+
+    const overlay = document.getElementById("resumeModalOverlay");
+    overlay.classList.add("visible");
+    document.body.style.overflow = "hidden"; // prevent background scroll
+}
+
+function closeResumeModal(event) {
+    // If called from overlay click, only close if clicking the backdrop itself
+    if (event && event.target !== event.currentTarget) return;
+
+    const overlay = document.getElementById("resumeModalOverlay");
+    overlay.classList.remove("visible");
+    document.body.style.overflow = "";
+}
+
+// Close modal on Escape key
+document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+        const overlay = document.getElementById("resumeModalOverlay");
+        if (overlay && overlay.classList.contains("visible")) {
+            closeResumeModal();
+        }
+    }
+});
+
+// --- Copy to Clipboard with Visual Feedback ---
+function copyToClipboardWithFeedback(btnElement, text) {
+    if (!text || text === "Not available") {
+        alert("This information is not available for the selected candidate.");
+        return;
+    }
+
+    const labelSpan = btnElement.querySelector("span");
+    const originalText = labelSpan.textContent;
+
+    const doSuccess = () => {
+        btnElement.classList.add("copy-success");
+        labelSpan.textContent = "Copied!";
+        setTimeout(() => {
+            btnElement.classList.remove("copy-success");
+            labelSpan.textContent = originalText;
+        }, 2000);
+    };
+
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(doSuccess);
+    } else {
+        // Fallback for HTTP
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
         doSuccess();
     }
 }

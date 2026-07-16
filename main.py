@@ -7,7 +7,7 @@ from groq import AsyncGroq
 from dotenv import load_dotenv
 
 from services.resume_parser import extract_resume_text
-from services.jd_generator  import stream_jd_generation, stream_resume_analysis
+from services.jd_generator  import stream_jd_generation, analyze_and_rank_batch
 from services.database       import init_db, save_jd, list_jds, get_jd, delete_jd, extract_keywords
 
 load_dotenv()
@@ -92,24 +92,32 @@ async def api_delete_jd(jd_id: int):
 
 # ── Resume Analysis ───────────────────────────────────────────────────────────
 @app.post("/api/analyze-resume")
-async def analyze_resume(jd_text: str = Form(...), resume_file: UploadFile = File(...)):
-    file_bytes = await resume_file.read()
-    try:
-        resume_text = extract_resume_text(file_bytes, resume_file.filename)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    if not resume_text:
-        raise HTTPException(status_code=400, detail="Could not extract text from resume.")
-
-    async def stream_generator():
+async def analyze_resume(
+    jd_text: str = Form(...),
+    resume_files: list[UploadFile] = File(...)
+):
+    if not resume_files:
+        raise HTTPException(status_code=400, detail="No resume files uploaded.")
+    
+    resumes_data = []
+    for resume_file in resume_files:
         try:
-            async for token in stream_resume_analysis(groq_client, jd_text, resume_text):
-                yield token.encode("utf-8")
+            file_bytes = await resume_file.read()
+            resume_text = extract_resume_text(file_bytes, resume_file.filename)
+            if not resume_text.strip():
+                continue
+            resumes_data.append({"name": resume_file.filename, "text": resume_text})
         except Exception as e:
-            yield f"\n[Error during analysis: {str(e)}]".encode("utf-8")
-
-    return StreamingResponse(stream_generator(), media_type="text/plain; charset=utf-8")
+            raise HTTPException(status_code=400, detail=f"Error parsing file '{resume_file.filename}': {str(e)}")
+            
+    if not resumes_data:
+        raise HTTPException(status_code=400, detail="No readable content found in any of the uploaded resumes.")
+        
+    try:
+        results = await analyze_and_rank_batch(groq_client, jd_text, resumes_data)
+        return JSONResponse(results)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error running batch evaluation: {str(e)}")
 
 
 # ── Static files ──────────────────────────────────────────────────────────────
