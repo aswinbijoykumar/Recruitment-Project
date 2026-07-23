@@ -113,8 +113,10 @@ You must return a JSON object with the following fields:
     "linkedin": "<extracted LinkedIn URL/link, or 'Not specified'>"
   },
   "skills_domain": "A comma-separated string of the candidate's key technical skills, tools, certifications, and domain expertise extracted from the resume. Example: 'Python, SQL, AWS, Risk Management, SOX Compliance, Financial Auditing'",
-  "profile_pitch": "A concise 2-3 line pitch describing the candidate, suitable for an HR/SME to paste directly into a client email. It should highlight the candidate's strongest selling points, years of experience, and domain relevance in a professional tone. Do NOT use bullet points.",
-  "profile_summary": "A comprehensive 4-5 line professional summary of the candidate covering their experience, core skills, domain expertise, education highlights, and overall suitability for the role. Written in third person, suitable for pasting into an Excel tracker or stakeholder report.",
+  "key_skills": ["A list of exactly 8 key technical skills, tools, or certifications extracted from the CV that are most relevant to the JD requirements."],
+  "profile_pitch": "A precise 2-line client-facing email pitch describing the candidate's alignment against the Job Description. Must highlight their years of experience and core fit in a professional tone. Written in third person without bullet points.",
+  "profile_summary": "A professional summary of the candidate of approximately 700 characters. Cover their experience, core skills, domain expertise, and general suitability. Must be highly factful and based strictly on direct facts present in the CV.",
+  "companies": ["A list of company/organization names the candidate has worked at, including current and previous employers. Extract these from the work experience section of the resume. Example: ['Deloitte', 'TCS', 'Infosys']. Return an empty list if none found."],
   "strengths": ["list of strengths matching the JD requirements, specific to the candidate"],
   "gaps": ["list of gaps or missing requirements compared to the JD"],
   "assessment": {
@@ -180,8 +182,10 @@ async def analyze_single_resume(client: AsyncGroq, jd_text: str, resume_name: st
                 "linkedin": "Not specified"
             },
             "skills_domain": "Not available",
+            "key_skills": [],
             "profile_pitch": "Not available",
             "profile_summary": "Not available",
+            "companies": [],
             "strengths": [],
             "gaps": ["Error parsing resume analysis"],
             "assessment": {},
@@ -244,4 +248,79 @@ async def analyze_and_rank_batch(client: AsyncGroq, jd_text: str, resumes: list[
         "reports": reports,
         "resume_texts": resume_texts
     }
+
+
+# ── Rejection Trends Synthesis ────────────────────────────────────────────────
+
+REJECTION_TRENDS_PROMPT = """You are a senior HR analytics expert at Protiviti.
+
+You are given multiple pieces of negative client feedback for candidates who were rejected for a specific role.
+Your task is to analyze ALL the feedback entries together and identify the COMMON patterns — what were the recurring gaps and weaknesses across these rejected candidates?
+
+Then produce a "sourcing refinement" paragraph that a recruiter can directly copy and add to their sourcing demand to avoid these same gaps in the next hiring cycle.
+
+Return a JSON object with these exact keys:
+{
+  "common_gaps": ["list of the most frequently recurring gaps/weaknesses across all rejected candidates — be specific and actionable"],
+  "sourcing_refinement": "A 4-6 line paragraph written as a demand addition. It should specify what the ideal candidate MUST have based on the patterns of past rejections. Written in professional tone, suitable for a recruiter to paste alongside client demands before sourcing on job portals. Do NOT use bullet points in this paragraph.",
+  "candidate_count": <number of feedback entries analyzed>,
+  "confidence": "High if 5+ feedback entries, Medium if 3-4, Low if 1-2"
+}
+
+Rules:
+- Focus on PATTERNS that appear across MULTIPLE candidates, not one-off issues.
+- The sourcing_refinement should be practical and directly usable by a recruiter.
+- No markdown, no emojis, no asterisks. Plain professional English.
+- Return ONLY valid JSON."""
+
+
+async def synthesize_rejection_trends(client: AsyncGroq, role: str, feedback_entries: list[dict]) -> dict:
+    """
+    Analyze negative feedback entries for a role and produce averaged rejection insights.
+    
+    Args:
+        client: AsyncGroq client instance
+        role: The job role being queried
+        feedback_entries: List of payload dicts from Qdrant (each has feedback_text, candidate_name, etc.)
+    
+    Returns:
+        Structured JSON with common_gaps, sourcing_refinement, candidate_count, confidence.
+    """
+    # Build the feedback summary for the LLM
+    feedback_lines = []
+    for i, entry in enumerate(feedback_entries, 1):
+        candidate = entry.get("candidate_name", "Unknown")
+        feedback = entry.get("feedback_text", "")
+        skills = entry.get("skills_domain", "")
+        experience = entry.get("experience", "")
+        
+        feedback_lines.append(
+            f"Candidate {i}: {candidate}\n"
+            f"Experience: {experience}\n"
+            f"Skills: {skills}\n"
+            f"Rejection Feedback: {feedback}\n"
+        )
+    
+    all_feedback = "\n---\n".join(feedback_lines)
+    user_msg = f"--- ROLE: {role} ---\n\n--- NEGATIVE FEEDBACK FROM {len(feedback_entries)} REJECTED CANDIDATES ---\n\n{all_feedback}"
+    
+    try:
+        completion = await client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": REJECTION_TRENDS_PROMPT},
+                {"role": "user",   "content": user_msg},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3,
+        )
+        result_text = completion.choices[0].message.content
+        return json.loads(result_text)
+    except Exception as e:
+        return {
+            "common_gaps": [f"Error analyzing trends: {str(e)}"],
+            "sourcing_refinement": "Unable to generate sourcing refinement due to an error.",
+            "candidate_count": len(feedback_entries),
+            "confidence": "Low",
+        }
 

@@ -7,16 +7,20 @@ from groq import AsyncGroq
 from dotenv import load_dotenv
 
 from services.resume_parser import extract_resume_text
-from services.jd_generator  import stream_jd_generation, analyze_and_rank_batch
+from services.jd_generator  import stream_jd_generation, analyze_and_rank_batch, synthesize_rejection_trends
 from services.database       import init_db, save_jd, list_jds, get_jd, delete_jd, extract_keywords
+from services.feedback_store import init_feedback_store, ingest_feedback_excel, query_rejection_trends, get_feedback_stats, clear_all_feedback
 
 load_dotenv()
 groq_client = AsyncGroq()
 
 app = FastAPI(title="Protiviti HR Automation API")
 
-# Initialise SQLite on startup
-init_db()
+@app.on_event("startup")
+async def startup_event():
+    # Initialise databases on startup (guards against reloader lock conflicts)
+    init_db()
+    init_feedback_store()
 
 
 # ── Data Models ───────────────────────────────────────────────────────────────
@@ -26,6 +30,9 @@ class DemandPayload(BaseModel):
 class SaveJDPayload(BaseModel):
     demands: str
     jd_text: str
+
+class RoleTrendsPayload(BaseModel):
+    role: str
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
@@ -118,6 +125,88 @@ async def analyze_resume(
         return JSONResponse(results)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error running batch evaluation: {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SOURCING INTELLIGENCE — Feedback Upload & Rejection Trends
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/upload-feedback")
+async def api_upload_feedback(file: UploadFile = File(...)):
+    """Upload an Excel (.xlsx) feedback file and ingest into Qdrant vector store."""
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported.")
+    
+    try:
+        file_bytes = await file.read()
+        result = ingest_feedback_excel(file_bytes)
+        
+        if result["errors"] and result["processed"] == 0:
+            raise HTTPException(status_code=400, detail=result["errors"][0])
+        
+        return JSONResponse(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing feedback file: {str(e)}")
+
+
+@app.post("/api/clear-feedback")
+async def api_clear_feedback():
+    """Clear all stored candidate feedback entries from vector memory."""
+    if clear_all_feedback():
+        return JSONResponse({"ok": True, "message": "Vector memory cleared successfully."})
+    else:
+        raise HTTPException(status_code=500, detail="Failed to clear vector memory collection.")
+
+
+@app.post("/api/rejection-trends")
+async def api_rejection_trends(payload: RoleTrendsPayload):
+    """Query rejection trends for a specific role using Qdrant + LLM synthesis."""
+    if not payload.role.strip():
+        raise HTTPException(status_code=400, detail="Role name is required.")
+    
+    try:
+        # Step 1: Get negative feedback entries from Qdrant (strict role filter)
+        feedback_entries = query_rejection_trends(payload.role.strip())
+        
+        if not feedback_entries:
+            return JSONResponse({
+                "common_gaps": [],
+                "sourcing_refinement": "",
+                "candidate_count": 0,
+                "confidence": "None",
+                "message": f"No rejection feedback found for role: {payload.role}",
+                "feedback_entries": [],
+            })
+        
+        # Step 2: LLM synthesis of common rejection patterns
+        synthesis = await synthesize_rejection_trends(groq_client, payload.role.strip(), feedback_entries)
+        
+        # Include the raw feedback entries for the UI to display
+        synthesis["feedback_entries"] = [
+            {
+                "candidate_name": e.get("candidate_name", "Unknown"),
+                "feedback_text": e.get("feedback_text", ""),
+                "experience": e.get("experience", ""),
+                "status_raw": e.get("status_raw", ""),
+            }
+            for e in feedback_entries
+        ]
+        
+        return JSONResponse(synthesis)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error analyzing rejection trends: {str(e)}")
+
+
+@app.get("/api/feedback-stats")
+async def api_feedback_stats():
+    """Get per-role feedback counts."""
+    try:
+        stats = get_feedback_stats()
+        return JSONResponse(stats)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching feedback stats: {str(e)}")
 
 
 # ── Static files ──────────────────────────────────────────────────────────────

@@ -73,7 +73,17 @@
                 <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" title="Toggle sidebar">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
-                <span class="top-bar-title">Resume Analyser</span>
+                <span class="top-bar-title" id="topBarTitle">Resume Analyser</span>
+                <div class="mode-toggle" id="modeToggle">
+                    <button class="mode-toggle-btn active" id="modeAnalyzerBtn" onclick="switchMode('analyzer')">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        Resume Analyzer
+                    </button>
+                    <button class="mode-toggle-btn" id="modeIntelBtn" onclick="switchMode('intelligence')">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                        Sourcing Intelligence
+                    </button>
+                </div>
             </div>
             <div class="top-bar-right">
                 <div class="user-chip">
@@ -85,6 +95,11 @@
 
         <!-- Scrollable content area -->
         <div class="content-area" id="contentArea">
+
+            <!-- ═══════════════════════════════════════════ -->
+            <!-- MODE: RESUME ANALYZER (default)             -->
+            <!-- ═══════════════════════════════════════════ -->
+            <div class="mode-section mode-analyzer active" id="modeAnalyzerSection">
 
             <!-- Hero -->
             <div class="hero-section">
@@ -242,8 +257,102 @@
                 </div>
             </div>
 
-        </div><!-- /content-area -->
+            </div><!-- /mode-analyzer -->
 
+            <!-- ═══════════════════════════════════════════ -->
+            <!-- MODE: SOURCING INTELLIGENCE                  -->
+            <!-- ═══════════════════════════════════════════ -->
+            <div class="mode-section mode-intelligence" id="modeIntelSection">
+
+                <!-- Hero -->
+                <div class="hero-section">
+                    <p class="hero-sub"></p>
+                </div>
+
+                <!-- ===== SYNC FEEDBACK CARD ===== -->
+                <div class="card intel-card" id="syncFeedbackCard">
+                    <div class="card-header intel-card-header">
+                        <div class="card-header-icon intel-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
+                        <div style="flex:1">
+                            <div class="card-title">Sync Client Feedback</div>
+                            <div class="card-subtitle">Upload your Excel feedback sheet to update the vector memory</div>
+                        </div>
+                        <button class="intel-clear-memory-btn" onclick="clearVectorMemory()" title="Clear all vector memory">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                            Clear Memory
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="feedback-upload-zone" id="feedbackUploadZone">
+                            <div class="upload-zone-inner">
+                                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <line x1="12" y1="18" x2="12" y2="12"/>
+                                    <polyline points="9 15 12 12 15 15"/>
+                                </svg>
+                                <span class="upload-zone-text">Drag & drop your <strong>.xlsx</strong> feedback file here</span>
+                                <span class="upload-zone-or">or</span>
+                                <label class="upload-zone-browse-btn">
+                                    <input type="file" accept=".xlsx,.xls" id="feedbackFileInput" onchange="uploadFeedbackExcel()" hidden />
+                                    Browse Files
+                                </label>
+                            </div>
+                        </div>
+                        <!-- Upload Result -->
+                        <div class="feedback-upload-result" id="feedbackUploadResult" style="display:none"></div>
+                        <!-- Feedback Stats -->
+                        <div class="feedback-stats-panel" id="feedbackStatsPanel" style="display:none"></div>
+                    </div>
+                </div>
+
+                <!-- ===== QUERY TRENDS CARD ===== -->
+                <div class="card intel-card" id="queryTrendsCard">
+                    <div class="card-header intel-card-header">
+                        <div class="card-header-icon intel-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        </div>
+                        <div style="flex:1">
+                            <div class="card-title">Query Rejection Trends</div>
+                            <div class="card-subtitle">Enter a role to get averaged negative feedback insights from past candidates</div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="intel-query-form">
+                            <div class="intel-input-row">
+                                <input type="text" class="intel-role-input" id="intelRoleInput" placeholder="e.g. Accounts Agile Coach PM, Gen AI BA..." autocomplete="off" />
+                                <button class="intel-analyze-btn" id="intelAnalyzeBtn" onclick="queryRejectionTrends()">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                                    Analyze Trends
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== TRENDS RESULTS CARD (hidden until results arrive) ===== -->
+                <div class="card intel-card intel-results-card" id="trendsResultCard" style="display:none">
+                    <div class="card-header intel-card-header">
+                        <div class="card-header-icon intel-icon intel-results-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                        </div>
+                        <div style="flex:1">
+                            <div class="card-title" id="trendsResultTitle">Rejection Trends Analysis</div>
+                            <div class="card-subtitle" id="trendsResultSubtitle">Averaged insights from past candidates</div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="trendsResultBody">
+                            <!-- Dynamically filled by JS -->
+                        </div>
+                    </div>
+                </div>
+
+            </div><!-- /mode-intelligence -->
+
+        </div><!-- /content-area -->
 
         <!-- Footer -->
         <footer class="bottom-bar">
@@ -275,8 +384,19 @@
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
+            <!-- Search Bar -->
+            <div class="resume-search-bar">
+                <div class="resume-search-input-wrapper">
+                    <svg class="resume-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" id="resumeSearchInput" class="resume-search-input" placeholder="Search keywords in resume..." autocomplete="off" />
+                    <span class="resume-search-count" id="resumeSearchCount"></span>
+                    <button class="resume-search-clear" id="resumeSearchClear" onclick="clearResumeSearch()" title="Clear search" style="display:none">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
             <div class="resume-modal-body">
-                <pre id="resumeModalContent">No resume content available.</pre>
+                <div id="resumeModalContent" class="resume-modal-text">No resume content available.</div>
             </div>
         </div>
     </div>

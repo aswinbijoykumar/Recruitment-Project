@@ -604,6 +604,12 @@ function renderDetailedReport(candidateName, report) {
     const profilePitch = report.profile_pitch || "Not available";
     const profileSummary = report.profile_summary || "Not available";
 
+    // Companies worked at
+    const companies = report.companies || [];
+    const companiesHtml = companies.length > 0
+        ? companies.map(c => `<span class="company-pill">${escHtml(c)}</span>`).join("")
+        : '<span class="company-pill company-pill-empty">No companies identified</span>';
+
     // Strengths list
     const strengthsHtml = (report.strengths || []).map(s => 
         `<div class="report-bullet">
@@ -635,15 +641,15 @@ function renderDetailedReport(candidateName, report) {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             <span>View Resume</span>
         </button>
-        <button class="candidate-action-btn" id="copySkillsBtn_${score}" onclick="copyToClipboardWithFeedback(this, \`${escHtml(skillsDomain).replace(/`/g, '')}\`)" title="Copy skills and domain expertise">
+        <button class="candidate-action-btn" id="copySkillsBtn_${score}" onclick="copyToClipboardWithFeedback(this, \`${report.key_skills && report.key_skills.length ? escHtml(report.key_skills.slice(0, 8).join(', ')).replace(/`/g, '') : escHtml(skillsDomain).split(',').slice(0, 8).join(', ').replace(/`/g, '')}\`)" title="Copy exactly 8 key skills and domain expertise">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             <span>Copy Skills</span>
         </button>
-        <button class="candidate-action-btn" onclick="copyToClipboardWithFeedback(this, \`${escHtml(profilePitch).replace(/`/g, '')}\`)" title="Copy 2-3 line email-ready profile pitch">
+        <button class="candidate-action-btn" onclick="copyToClipboardWithFeedback(this, \`${escHtml(profilePitch).replace(/`/g, '')}\`)" title="Copy 2-line client pitch">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
             <span>Copy Profile Pitch</span>
         </button>
-        <button class="candidate-action-btn" onclick="copyToClipboardWithFeedback(this, \`${escHtml(profileSummary).replace(/`/g, '')}\`)" title="Copy comprehensive profile summary for Excel/reports">
+        <button class="candidate-action-btn" onclick="copyToClipboardWithFeedback(this, \`${escHtml(profileSummary).replace(/`/g, '')}\`)" title="Copy 700-character profile summary">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
             <span>Copy Profile Summary</span>
         </button>
@@ -651,6 +657,16 @@ function renderDetailedReport(candidateName, report) {
 
     return `
     ${actionToolbarHtml}
+
+    <div class="report-section companies-section">
+        <div class="report-section-header">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Companies Worked At
+        </div>
+        <div class="report-section-body companies-body">
+            ${companiesHtml}
+        </div>
+    </div>
 
     <div class="report-score-banner">
         <div class="report-score-left">
@@ -731,6 +747,8 @@ function copyAnalysis() {
 // =============================================
 
 // --- View Resume Modal ---
+let _currentResumeRawText = ""; // store the raw text for search highlighting
+
 function viewResume(candidateName) {
     if (!batchAnalysisData || !batchAnalysisData.resume_texts) {
         alert("No resume data available.");
@@ -743,12 +761,19 @@ function viewResume(candidateName) {
         return;
     }
 
+    _currentResumeRawText = resumeText;
     document.getElementById("resumeModalTitle").textContent = `Resume: ${candidateName}`;
     document.getElementById("resumeModalContent").textContent = resumeText;
 
+    // Clear any previous search
+    clearResumeSearch();
+
     const overlay = document.getElementById("resumeModalOverlay");
     overlay.classList.add("visible");
-    document.body.style.overflow = "hidden"; // prevent background scroll
+    document.body.style.overflow = "hidden";
+
+    // Focus the search input after the modal opens
+    setTimeout(() => document.getElementById("resumeSearchInput").focus(), 300);
 }
 
 function closeResumeModal(event) {
@@ -758,6 +783,7 @@ function closeResumeModal(event) {
     const overlay = document.getElementById("resumeModalOverlay");
     overlay.classList.remove("visible");
     document.body.style.overflow = "";
+    _currentResumeRawText = "";
 }
 
 // Close modal on Escape key
@@ -769,6 +795,82 @@ document.addEventListener("keydown", function (e) {
         }
     }
 });
+
+// =============================================
+// RESUME KEYWORD SEARCH & HIGHLIGHT
+// =============================================
+
+let _searchDebounceTimer = null;
+
+// Wire up search input — debounced
+document.addEventListener("DOMContentLoaded", function () {
+    const searchInput = document.getElementById("resumeSearchInput");
+    if (!searchInput) return;
+
+    searchInput.addEventListener("input", function () {
+        clearTimeout(_searchDebounceTimer);
+        _searchDebounceTimer = setTimeout(() => {
+            performResumeSearch(searchInput.value);
+        }, 250);
+    });
+});
+
+function performResumeSearch(query) {
+    const contentEl = document.getElementById("resumeModalContent");
+    const countEl = document.getElementById("resumeSearchCount");
+    const clearBtn = document.getElementById("resumeSearchClear");
+
+    if (!_currentResumeRawText) return;
+
+    const trimmedQuery = query.trim();
+
+    if (!trimmedQuery) {
+        // No query — show plain text
+        contentEl.textContent = _currentResumeRawText;
+        countEl.textContent = "";
+        clearBtn.style.display = "none";
+        return;
+    }
+
+    clearBtn.style.display = "flex";
+
+    // Escape regex special chars in the query
+    const escapedQuery = trimmedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`(${escapedQuery})`, "gi");
+
+    // Count matches
+    const matches = _currentResumeRawText.match(regex);
+    const matchCount = matches ? matches.length : 0;
+    countEl.textContent = matchCount > 0 ? `${matchCount} match${matchCount !== 1 ? "es" : ""}` : "No matches";
+    countEl.className = "resume-search-count" + (matchCount === 0 ? " no-matches" : "");
+
+    // Build highlighted HTML
+    // First escape the raw text for safe HTML, then wrap matches in <mark>
+    const safeText = escHtml(_currentResumeRawText);
+    const safeEscapedQuery = escHtml(trimmedQuery).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const highlightRegex = new RegExp(`(${safeEscapedQuery})`, "gi");
+    contentEl.innerHTML = safeText.replace(highlightRegex, '<mark class="resume-highlight">$1</mark>');
+
+    // Scroll to the first match
+    const firstMark = contentEl.querySelector(".resume-highlight");
+    if (firstMark) {
+        firstMark.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+}
+
+function clearResumeSearch() {
+    const searchInput = document.getElementById("resumeSearchInput");
+    const countEl = document.getElementById("resumeSearchCount");
+    const clearBtn = document.getElementById("resumeSearchClear");
+    const contentEl = document.getElementById("resumeModalContent");
+
+    if (searchInput) searchInput.value = "";
+    if (countEl) countEl.textContent = "";
+    if (clearBtn) clearBtn.style.display = "none";
+    if (contentEl && _currentResumeRawText) {
+        contentEl.textContent = _currentResumeRawText;
+    }
+}
 
 // --- Copy to Clipboard with Visual Feedback ---
 function copyToClipboardWithFeedback(btnElement, text) {
@@ -802,5 +904,358 @@ function copyToClipboardWithFeedback(btnElement, text) {
         document.execCommand("copy");
         document.body.removeChild(ta);
         doSuccess();
+    }
+}
+
+
+// =============================================
+// SOURCING INTELLIGENCE — Mode Switch, Upload, Query
+// =============================================
+
+let currentMode = "analyzer"; // 'analyzer' or 'intelligence'
+
+function switchMode(mode) {
+    currentMode = mode;
+
+    // Toggle mode sections
+    const analyzerSection = document.getElementById("modeAnalyzerSection");
+    const intelSection = document.getElementById("modeIntelSection");
+    const analyzerBtn = document.getElementById("modeAnalyzerBtn");
+    const intelBtn = document.getElementById("modeIntelBtn");
+    const title = document.getElementById("topBarTitle");
+
+    if (mode === "analyzer") {
+        analyzerSection.classList.add("active");
+        intelSection.classList.remove("active");
+        analyzerBtn.classList.add("active");
+        intelBtn.classList.remove("active");
+        title.textContent = "Resume Analyser";
+    } else {
+        analyzerSection.classList.remove("active");
+        intelSection.classList.add("active");
+        analyzerBtn.classList.remove("active");
+        intelBtn.classList.add("active");
+        title.textContent = "Sourcing Intelligence";
+        // Load stats when entering intelligence mode
+        loadFeedbackStats();
+    }
+}
+
+// --- Drag & Drop for Feedback Excel ---
+document.addEventListener("DOMContentLoaded", function () {
+    const zone = document.getElementById("feedbackUploadZone");
+    if (!zone) return;
+
+    zone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        zone.classList.add("dragover");
+    });
+    zone.addEventListener("dragleave", () => {
+        zone.classList.remove("dragover");
+    });
+    zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("dragover");
+        const file = e.dataTransfer.files[0];
+        if (file && (file.name.endsWith(".xlsx") || file.name.endsWith(".xls"))) {
+            _doFeedbackUpload(file);
+        } else {
+            alert("Please drop a valid .xlsx file.");
+        }
+    });
+});
+
+// --- Upload Feedback Excel ---
+function uploadFeedbackExcel() {
+    const input = document.getElementById("feedbackFileInput");
+    if (!input.files.length) return;
+    _doFeedbackUpload(input.files[0]);
+}
+
+async function _doFeedbackUpload(file) {
+    const resultEl = document.getElementById("feedbackUploadResult");
+    resultEl.style.display = "block";
+    resultEl.innerHTML = `
+        <div class="upload-progress">
+            <div class="upload-progress-spinner"></div>
+            <span>Processing <strong>${escHtml(file.name)}</strong>... Embedding feedback into vector memory</span>
+        </div>
+    `;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+        const res = await fetch("/api/upload-feedback", { method: "POST", body: formData });
+        const data = await res.json();
+
+        if (!res.ok) {
+            resultEl.innerHTML = `
+                <div class="upload-result-error">
+                    <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><line x1=\"15\" y1=\"9\" x2=\"9\" y2=\"15\"/><line x1=\"9\" y1=\"9\" x2=\"15\" y2=\"15\"/></svg>
+                    <span>${escHtml(data.detail || "Upload failed")}</span>
+                </div>
+            `;
+            return;
+        }
+
+        const rolesHtml = data.roles_found.map(r => `<span class="intel-role-tag">${escHtml(r)}</span>`).join("");
+        resultEl.innerHTML = `
+            <div class="upload-result-success">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <div>
+                    <strong>${data.processed}</strong> feedback entries synced to vector memory
+                    ${data.skipped > 0 ? `<span class="upload-skipped">(${data.skipped} rows skipped — missing status/feedback)</span>` : ""}
+                    <div class="upload-roles-found">${rolesHtml}</div>
+                </div>
+            </div>
+        `;
+
+        // Reload stats
+        loadFeedbackStats();
+
+    } catch (err) {
+        resultEl.innerHTML = `
+            <div class="upload-result-error">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                <span>Network error: ${escHtml(err.message)}</span>
+            </div>
+        `;
+    }
+
+    // Reset file input
+    document.getElementById("feedbackFileInput").value = "";
+}
+
+// --- Load Feedback Stats ---
+async function loadFeedbackStats() {
+    const panel = document.getElementById("feedbackStatsPanel");
+    try {
+        const res = await fetch("/api/feedback-stats");
+        const data = await res.json();
+
+        if (!data.total || data.total === 0) {
+            panel.style.display = "none";
+            return;
+        }
+
+        const roles = data.roles;
+        const roleCards = Object.entries(roles).map(([role, counts]) => `
+            <div class="stats-role-card">
+                <div class="stats-role-name">${escHtml(role)}</div>
+                <div class="stats-role-counts">
+                    <span class="stats-count-badge stats-negative">${counts.negative} negative</span>
+                    <span class="stats-count-badge stats-positive">${counts.positive} positive</span>
+                    <span class="stats-count-badge stats-total">${counts.total} total</span>
+                </div>
+            </div>
+        `).join("");
+
+        panel.style.display = "block";
+        panel.innerHTML = `
+            <div class="stats-header">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                Vector Memory — ${data.total} entries across ${Object.keys(roles).length} roles
+            </div>
+            <div class="stats-roles-grid">${roleCards}</div>
+        `;
+    } catch (err) {
+        panel.style.display = "none";
+    }
+}
+
+// --- Query Rejection Trends ---
+async function queryRejectionTrends() {
+    const roleInput = document.getElementById("intelRoleInput");
+    const role = roleInput.value.trim();
+    if (!role) {
+        alert("Please enter a role name to analyze.");
+        roleInput.focus();
+        return;
+    }
+
+    const resultCard = document.getElementById("trendsResultCard");
+    const resultBody = document.getElementById("trendsResultBody");
+    const analyzeBtn = document.getElementById("intelAnalyzeBtn");
+
+    // Show loading
+    resultCard.style.display = "block";
+    analyzeBtn.disabled = true;
+    analyzeBtn.innerHTML = `<div class="upload-progress-spinner" style="width:14px;height:14px"></div> Analyzing...`;
+    resultBody.innerHTML = `
+        <div class="intel-loading">
+            <div class="upload-progress-spinner"></div>
+            <span>Searching vector memory for <strong>${escHtml(role)}</strong> rejection patterns...</span>
+        </div>
+    `;
+
+    try {
+        const res = await fetch("/api/rejection-trends", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            resultBody.innerHTML = `<div class="upload-result-error"><span>${escHtml(data.detail || "Error")}</span></div>`;
+            return;
+        }
+
+        if (data.candidate_count === 0 || data.confidence === "None") {
+            resultBody.innerHTML = `
+                <div class="intel-no-results">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span>No rejection feedback found for <strong>"${escHtml(role)}"</strong>. Upload feedback data first, or check the exact role name.</span>
+                </div>
+            `;
+            return;
+        }
+
+        document.getElementById("trendsResultTitle").textContent = `Rejection Trends: ${role}`;
+        document.getElementById("trendsResultSubtitle").textContent = `Averaged insights from ${data.candidate_count} rejected candidate${data.candidate_count !== 1 ? "s" : ""}`;
+
+        renderTrendsResults(data, role);
+
+    } catch (err) {
+        resultBody.innerHTML = `<div class="upload-result-error"><span>Network error: ${escHtml(err.message)}</span></div>`;
+    } finally {
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Analyze Trends`;
+    }
+}
+
+function renderTrendsResults(data, role) {
+    const resultBody = document.getElementById("trendsResultBody");
+
+    // Confidence badge
+    const confClass = data.confidence === "High" ? "conf-high" : data.confidence === "Medium" ? "conf-medium" : "conf-low";
+
+    // Common gaps
+    const gapsHtml = (data.common_gaps || []).map(g => `
+        <div class="intel-gap-item">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <span>${escHtml(g)}</span>
+        </div>
+    `).join("");
+
+    // Individual feedback entries
+    const entriesHtml = (data.feedback_entries || []).map((e, i) => `
+        <div class="intel-feedback-entry">
+            <div class="intel-feedback-entry-header">
+                <span class="intel-feedback-candidate">${escHtml(e.candidate_name || "Unknown")}</span>
+                <span class="intel-feedback-status">${escHtml(e.status_raw || "")}</span>
+            </div>
+            <div class="intel-feedback-text">${escHtml(e.feedback_text || "")}</div>
+        </div>
+    `).join("");
+
+    resultBody.innerHTML = `
+        <!-- Stats Bar -->
+        <div class="intel-stats-bar">
+            <span class="intel-stat-chip">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                ${data.candidate_count} candidates analyzed
+            </span>
+            <span class="intel-stat-chip intel-conf-chip ${confClass}">
+                Confidence: ${data.confidence}
+            </span>
+        </div>
+
+        <!-- Sourcing Refinement (the key output) -->
+        <div class="intel-refinement-section">
+            <div class="intel-refinement-header">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                <span>Sourcing Refinement — Add this to your demand</span>
+                <button class="intel-copy-btn" onclick="copyRefinementText()" title="Copy refinement text">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <span>Copy</span>
+                </button>
+            </div>
+            <div class="intel-refinement-body" id="refinementText">${escHtml(data.sourcing_refinement || "")}</div>
+        </div>
+
+        <!-- Common Gaps -->
+        <div class="intel-section">
+            <div class="intel-section-header">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Common Gaps Across Rejected Candidates
+            </div>
+            <div class="intel-section-body">${gapsHtml || '<span class="intel-muted">No specific gaps identified.</span>'}</div>
+        </div>
+
+        <!-- Individual Feedback Entries -->
+        <div class="intel-section intel-entries-section">
+            <div class="intel-section-header">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Individual Client Feedback (${data.feedback_entries ? data.feedback_entries.length : 0} entries)
+            </div>
+            <div class="intel-section-body intel-entries-body">${entriesHtml}</div>
+        </div>
+    `;
+}
+
+// --- Copy Refinement Text ---
+function copyRefinementText() {
+    const text = document.getElementById("refinementText").textContent;
+    if (!text.trim()) return;
+
+    const btn = document.querySelector(".intel-copy-btn");
+    const labelSpan = btn.querySelector("span");
+
+    const doSuccess = () => {
+        btn.classList.add("copy-success");
+        labelSpan.textContent = "Copied!";
+        setTimeout(() => { btn.classList.remove("copy-success"); labelSpan.textContent = "Copy"; }, 2000);
+    };
+
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(doSuccess);
+    } else {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); document.body.removeChild(ta);
+        doSuccess();
+    }
+}
+
+// --- Clear Vector Memory ---
+async function clearVectorMemory() {
+    if (!confirm("Are you sure you want to clear all candidate feedback from vector memory? This action cannot be undone.")) {
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/clear-feedback", { method: "POST" });
+        const data = await res.json();
+
+        if (res.ok) {
+            alert(data.message || "Vector memory cleared successfully.");
+            
+            // Clear stats display
+            const statsPanel = document.getElementById("feedbackStatsPanel");
+            if (statsPanel) {
+                statsPanel.style.display = "none";
+                statsPanel.innerHTML = "";
+            }
+            
+            // Clear search result card
+            const resultCard = document.getElementById("trendsResultCard");
+            if (resultCard) {
+                resultCard.style.display = "none";
+            }
+            
+            // Clear upload results message
+            const uploadResult = document.getElementById("feedbackUploadResult");
+            if (uploadResult) {
+                uploadResult.style.display = "none";
+                uploadResult.innerHTML = "";
+            }
+        } else {
+            alert("Error clearing vector memory: " + (data.detail || "Server error"));
+        }
+    } catch (err) {
+        alert("Failed to connect to server: " + err.message);
     }
 }
