@@ -1,50 +1,23 @@
 """
-Qdrant-backed Feedback Store for Sourcing Intelligence.
-Stores candidate feedback as vectors for semantic similarity search.
-Uses FastEmbed (ONNX) for automatic text embedding — no GPU required.
+SQLite-backed Feedback Store for Sourcing Intelligence.
+Stores candidate feedback datasets and records in SQLite for LLM-based context analysis.
 """
 
-import uuid
 import io
-from datetime import datetime
-from pathlib import Path
 from openpyxl import load_workbook
-from qdrant_client import QdrantClient, models
-
-# ── Constants ─────────────────────────────────────────────────────────────────
-QDRANT_PATH = Path("data/qdrant_feedback")
-COLLECTION_NAME = "candidate_feedback"
-
-# Column name mappings from the real Excel sheet
-COL_ROLE = "HSBC Role Mapping"
-COL_CANDIDATE = "Resource Name"
-COL_STATUS = "Status"
-COL_FEEDBACK = "Client Feedback"
-COL_SKILLS = "Skills / Domain"
-COL_SUMMARY = "Profile Summary"
-COL_EXPERIENCE = "Total / Relevant Experience"
-
-# ── Qdrant Client (module-level singleton) ────────────────────────────────────
-_qdrant_client: QdrantClient | None = None
-
-
-def _get_client() -> QdrantClient:
-    global _qdrant_client
-    if _qdrant_client is None:
-        raise RuntimeError("Feedback store not initialised. Call init_feedback_store() first.")
-    return _qdrant_client
+from services.database import (
+    init_db,
+    save_feedback_dataset,
+    get_feedback_records_by_role,
+    get_sqlite_feedback_stats,
+    clear_all_sqlite_feedback,
+)
 
 
 def init_feedback_store():
-    """Initialise Qdrant client with local disk persistence."""
-    global _qdrant_client
-    if _qdrant_client is not None:
-        return
-    QDRANT_PATH.mkdir(parents=True, exist_ok=True)
-    _qdrant_client = QdrantClient(path=str(QDRANT_PATH))
+    """Initialise SQLite tables."""
+    init_db()
 
-
-# ── Excel Ingestion ───────────────────────────────────────────────────────────
 
 def _derive_feedback_type(status: str) -> str:
     """Derive 'positive' or 'negative' from the Status column value."""
@@ -56,203 +29,113 @@ def _derive_feedback_type(status: str) -> str:
     return "positive"
 
 
-def ingest_feedback_excel(file_bytes: bytes) -> dict:
-    """
-    Parse an .xlsx file and store each feedback row as a Qdrant point.
+def _find_col(headers: list[str], candidates: list[str]) -> int:
+    """Find column index matching candidate header names (case-insensitive substring/match)."""
+    headers_lower = [h.lower() for h in headers]
+    for cand in candidates:
+        cand_lower = cand.lower()
+        for idx, h in enumerate(headers_lower):
+            if cand_lower in h:
+                return idx
+    return -1
 
-    Returns:
-        {
-            "processed": int,
-            "skipped": int,
-            "errors": list[str],
-            "roles_found": list[str]
-        }
+
+def ingest_feedback_excel(file_bytes: bytes, filename: str = "feedback_sheet.xlsx") -> dict:
     """
-    client = _get_client()
+    Parse an .xlsx file and store each feedback row as a record in SQLite.
+    Strictly extracts Role of candidate, Job Family, and Client Feedback.
+    """
     wb = load_workbook(filename=io.BytesIO(file_bytes), read_only=True, data_only=True)
     ws = wb.active
 
-    # Read header row and build column index
+    # Read header row
     headers = [str(cell.value).strip() if cell.value else "" for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-    col_map = {h: i for i, h in enumerate(headers)}
 
-    # Validate required columns exist
-    required = [COL_ROLE, COL_CANDIDATE, COL_STATUS, COL_FEEDBACK]
-    missing = [c for c in required if c not in col_map]
-    if missing:
+    # Find column indices
+    role_idx = _find_col(headers, ["HSBC Role Mapping", "Role of the candidate", "Role", "Job Role"])
+    job_family_idx = _find_col(headers, ["Job Family", "Role Family", "Domain", "Job Track"])
+    feedback_idx = _find_col(headers, ["Client Feedback", "Feedback", "Rejection Reason"])
+    candidate_idx = _find_col(headers, ["Resource Name", "Candidate Name", "Candidate"])
+    status_idx = _find_col(headers, ["Status", "Decision"])
+
+    # Fallback to column index 0, 1, etc., if specific header not found
+    if role_idx == -1: role_idx = 0
+    if feedback_idx == -1 and len(headers) > 3: feedback_idx = 3
+
+    if role_idx == -1 or feedback_idx == -1:
+        wb.close()
         return {
             "processed": 0,
             "skipped": 0,
-            "errors": [f"Missing required columns: {', '.join(missing)}"],
+            "errors": ["Excel file must contain columns for Role of candidate and Client Feedback."],
             "roles_found": [],
         }
-
-    # Reset collection (drop collection) to ensure fresh named vector configuration on next add()
-    try:
-        client.delete_collection(COLLECTION_NAME)
-    except Exception as e:
-        errors.append(f"Warning: Failed to clear old collection: {str(e)}")
 
     processed = 0
     skipped = 0
     errors = []
-    roles_seen = set()
-    points = []
+    records = []
 
     for row in ws.iter_rows(min_row=2, values_only=True):
         try:
-            role = str(row[col_map[COL_ROLE]] or "").strip()
-            candidate = str(row[col_map[COL_CANDIDATE]] or "").strip()
-            status_raw = str(row[col_map[COL_STATUS]] or "").strip()
-            feedback = str(row[col_map[COL_FEEDBACK]] or "").strip()
+            role = str(row[role_idx] or "").strip() if role_idx < len(row) else ""
+            feedback = str(row[feedback_idx] or "").strip() if feedback_idx < len(row) else ""
+            job_family = str(row[job_family_idx] or "").strip() if (job_family_idx != -1 and job_family_idx < len(row)) else ""
+            candidate = str(row[candidate_idx] or "").strip() if (candidate_idx != -1 and candidate_idx < len(row)) else "Candidate"
+            status_raw = str(row[status_idx] or "").strip() if (status_idx != -1 and status_idx < len(row)) else "Rejected"
 
-            # Skip rows without both status and feedback
-            if not status_raw or not feedback or status_raw == "None" or feedback == "None":
-                skipped += 1
-                continue
+            if role == "None": role = ""
+            if feedback == "None": feedback = ""
+            if job_family == "None": job_family = ""
+            if candidate == "None": candidate = "Candidate"
+            if status_raw == "None": status_raw = "Rejected"
 
-            if not role:
+            # Skip rows without role or feedback
+            if not role or not feedback:
                 skipped += 1
                 continue
 
             feedback_type = _derive_feedback_type(status_raw)
-            roles_seen.add(role)
 
-            # Optional columns
-            skills = str(row[col_map.get(COL_SKILLS, -1)] or "").strip() if COL_SKILLS in col_map else ""
-            summary = str(row[col_map.get(COL_SUMMARY, -1)] or "").strip() if COL_SUMMARY in col_map else ""
-            experience = str(row[col_map.get(COL_EXPERIENCE, -1)] or "").strip() if COL_EXPERIENCE in col_map else ""
-
-            point_id = str(uuid.uuid4())
-            payload = {
+            records.append({
                 "role": role,
+                "job_family": job_family or "General",
                 "candidate_name": candidate,
+                "status_raw": status_raw,
                 "feedback_type": feedback_type,
                 "feedback_text": feedback,
-                "status_raw": status_raw,
-                "skills_domain": skills,
-                "profile_summary": summary,
-                "experience": experience,
-                "stored_at": datetime.utcnow().isoformat(),
-            }
-
-            points.append({
-                "id": point_id,
-                "text": feedback,  # This text will be embedded
-                "payload": payload,
             })
-
             processed += 1
 
         except Exception as e:
-            errors.append(f"Row error: {str(e)}")
+            errors.append(f"Row parsing error: {str(e)}")
 
     wb.close()
 
-    # Batch upsert with auto-embedding via FastEmbed
-    if points:
-        from qdrant_client.models import PointStruct
-        # Use the add() method with documents for auto-embedding
-        client.add(
-            collection_name=COLLECTION_NAME,
-            documents=[p["text"] for p in points],
-            metadata=[p["payload"] for p in points],
-            ids=[p["id"] for p in points],
-        )
+    if not records:
+        return {
+            "processed": 0,
+            "skipped": skipped,
+            "errors": errors or ["No valid feedback rows found in file."],
+            "roles_found": [],
+        }
 
-    return {
-        "processed": processed,
-        "skipped": skipped,
-        "errors": errors,
-        "roles_found": sorted(roles_seen),
-    }
+    save_result = save_feedback_dataset(filename, records)
+    save_result["skipped"] = skipped
+    save_result["errors"] = errors
+    return save_result
 
 
-# ── Query Rejection Trends ───────────────────────────────────────────────────
+def query_rejection_trends(role: str) -> list[dict]:
+    """Fetch negative feedback records for a specific role from SQLite."""
+    return get_feedback_records_by_role(role, negative_only=True)
 
-def query_rejection_trends(role: str, limit: int = 50) -> list[dict]:
-    """
-    Search Qdrant for negative feedback entries matching the given role.
-    Uses strict payload filtering so roles don't mix.
-
-    Returns list of payload dicts for matching points.
-    """
-    client = _get_client()
-
-    # Strict filter: exact role match AND negative feedback only
-    role_filter = models.Filter(
-        must=[
-            models.FieldCondition(
-                key="role",
-                match=models.MatchValue(value=role),
-            ),
-            models.FieldCondition(
-                key="feedback_type",
-                match=models.MatchValue(value="negative"),
-            ),
-        ]
-    )
-
-    # Scroll through all matching points (no vector query needed — we want ALL negative feedback for this role)
-    try:
-        results, _ = client.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=role_filter,
-            limit=limit,
-            with_payload=True,
-        )
-    except Exception:
-        # Collection does not exist yet (no files uploaded)
-        return []
-
-    return [point.payload for point in results]
-
-
-# ── Feedback Stats ────────────────────────────────────────────────────────────
 
 def get_feedback_stats() -> dict:
-    """
-    Returns feedback counts grouped by role and type.
-    Format: { "roles": { "Gen AI BA": { "positive": 3, "negative": 5, "total": 8 }, ... }, "total": 20 }
-    """
-    client = _get_client()
-
-    # Scroll all points to aggregate stats
-    try:
-        all_points, _ = client.scroll(
-            collection_name=COLLECTION_NAME,
-            limit=1000,
-            with_payload=True,
-        )
-    except Exception:
-        # Collection does not exist yet
-        return {"roles": {}, "total": 0}
-
-    roles = {}
-    for point in all_points:
-        role = point.payload.get("role", "Unknown")
-        ftype = point.payload.get("feedback_type", "unknown")
-
-        if role not in roles:
-            roles[role] = {"positive": 0, "negative": 0, "total": 0}
-
-        if ftype == "positive":
-            roles[role]["positive"] += 1
-        elif ftype == "negative":
-            roles[role]["negative"] += 1
-        roles[role]["total"] += 1
-
-    return {
-        "roles": roles,
-        "total": sum(r["total"] for r in roles.values()),
-    }
+    """Returns feedback counts grouped by role and type from SQLite."""
+    return get_sqlite_feedback_stats()
 
 
 def clear_all_feedback() -> bool:
-    """Delete the candidate_feedback collection completely from disk."""
-    client = _get_client()
-    try:
-        client.delete_collection(COLLECTION_NAME)
-        return True
-    except Exception:
-        return False
+    """Clear all candidate feedback datasets and records from SQLite."""
+    return clear_all_sqlite_feedback()

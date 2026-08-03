@@ -26,39 +26,69 @@
             <span id="logoFb" class="sidebar-logo-fallback" style="display:none;">protiviti<sup>®</sup></span>
         </div>
 
-        <!-- New Analysis Button -->
-        <button class="new-chat-btn" id="newChatBtn" onclick="newChat()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            New Analysis
-        </button>
+        <div class="sidebar-content-scroll" style="flex:1; overflow-y:auto; padding-right:2px;">
+            <!-- ═══════════════════════════════════════════ -->
+            <!-- SIDEBAR SECTION: RESUME ANALYZER (DEFAULT)   -->
+            <!-- ═══════════════════════════════════════════ -->
+            <div class="sidebar-mode-section active" id="sidebarSectionAnalyzer">
+                <button class="new-chat-btn" id="newChatBtn" onclick="newChat()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    New Analysis
+                </button>
 
-        <!-- Saved JDs Section -->
-        <div class="sidebar-section-label">SAVED JOB DESCRIPTIONS</div>
+                <div class="sidebar-section-label">SAVED JOB DESCRIPTIONS</div>
+                <div class="saved-jd-list" id="savedJdList">
+                    <div class="saved-jd-empty" id="savedJdEmpty">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <span>No saved JDs yet.<br>Generate and save your first one.</span>
+                    </div>
+                </div>
+            </div>
 
-        <!-- Saved JD list (populated by JS) -->
-        <div class="saved-jd-list" id="savedJdList">
-            <!-- Empty state shown until JDs are loaded -->
-            <div class="saved-jd-empty" id="savedJdEmpty">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                <span>No saved JDs yet.<br>Generate and save your first one.</span>
+            <!-- ═══════════════════════════════════════════ -->
+            <!-- SIDEBAR SECTION: SOURCING INTELLIGENCE      -->
+            <!-- ═══════════════════════════════════════════ -->
+            <div class="sidebar-mode-section" id="sidebarSectionIntelligence">
+                <label class="new-chat-btn upload-sidebar-btn" style="cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+                    <input type="file" accept=".xlsx,.xls" onchange="uploadFeedbackExcelFromSidebar(this)" hidden />
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Sync Excel Sheet
+                </label>
+
+                <div class="sidebar-section-label">SAVED FEEDBACK SHEETS</div>
+                <div class="saved-jd-list" id="savedFeedbackList">
+                    <div class="saved-jd-empty" id="savedFeedbackEmpty">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                        <span>No saved feedback sheets.<br>Upload an Excel sheet to save one.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══════════════════════════════════════════ -->
+            <!-- SIDEBAR SECTION: QUESTION BANK             -->
+            <!-- ═══════════════════════════════════════════ -->
+            <div class="sidebar-mode-section" id="sidebarSectionQuestions">
+                <div class="role-creator-form">
+                    <div class="sidebar-role-input-group">
+                        <input type="text" id="newRoleInput" class="sidebar-role-input" placeholder="e.g. Frontend Engineer" />
+                        <button class="new-chat-btn sidebar-add-role-btn" onclick="createNewRoleBank()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            + Add Job Role
+                        </button>
+                    </div>
+                </div>
+
+                <div class="sidebar-section-label">QUESTION BANK ROLES</div>
+                <div class="saved-jd-list" id="sidebarRolesListGroup">
+                    <div class="saved-jd-empty">No roles available</div>
+                </div>
             </div>
         </div>
 
-        <!-- Sidebar Footer: Status -->
+        <!-- Sidebar Footer: Copyright Info -->
         <div class="sidebar-footer">
-            <div class="status-row">
-                <span class="status-dot" id="statusDot"></span>
-                <span id="statusLabel">System Ready</span>
-            </div>
-            <div class="stats-row">
-                <div class="stat-item">
-                    <span class="stat-label">Tokens</span>
-                    <span class="stat-value" id="tokenCount">—</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Time</span>
-                    <span class="stat-value" id="timeCount">—</span>
-                </div>
+            <div class="sidebar-footer-copy">
+                &copy; 2026 Protiviti Inc. · HR Automation Platform
             </div>
         </div>
 
@@ -82,6 +112,10 @@
                     <button class="mode-toggle-btn" id="modeIntelBtn" onclick="switchMode('intelligence')">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
                         Sourcing Intelligence
+                    </button>
+                    <button class="mode-toggle-btn" id="modeQuestionBankBtn" onclick="switchMode('questions')">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        Interview Question Bank
                     </button>
                 </div>
             </div>
@@ -148,9 +182,12 @@
                     <div class="card-header-icon output-card-icon">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     </div>
-                    <div>
-                        <div class="card-title">Generated Job Description</div>
-                        <div class="card-subtitle" id="outputMeta">Ready</div>
+                    <div style="flex:1;">
+                        <div class="card-title" style="display:flex; align-items:center; gap:8px;">
+                            <span>Generated Job Description</span>
+                            <span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74, 127, 203, 0.15); color:var(--blue-accent); text-transform:uppercase; letter-spacing:0.5px;">Editable</span>
+                        </div>
+                        <div class="card-subtitle" id="outputMeta">Ready · Click inside the box below to edit text in real-time</div>
                     </div>
                     <div class="output-actions">
                         <button class="action-btn" id="copyBtn" onclick="copyOutput()">
@@ -168,8 +205,9 @@
                     </div>
                 </div>
                 <div class="card-body output-body">
-                    <pre id="jdOutput"></pre>
+                    <pre id="jdOutput" contenteditable="true" placeholder="Generated Job Description will appear here..." style="outline: none;"></pre>
                 </div>
+
             </div>
 
             <!-- ===== RESUME ANALYZER CARD ===== -->
@@ -276,12 +314,12 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                         </div>
                         <div style="flex:1">
-                            <div class="card-title">Sync Client Feedback</div>
-                            <div class="card-subtitle">Upload your Excel feedback sheet to update the vector memory</div>
+                            <div class="card-title">Sync Client Feedback Datasets</div>
+                            <div class="card-subtitle">Upload your Excel feedback sheets to save them into the SQLite Intelligence Store</div>
                         </div>
-                        <button class="intel-clear-memory-btn" onclick="clearVectorMemory()" title="Clear all vector memory">
+                        <button class="intel-clear-memory-btn" onclick="clearVectorMemory()" title="Clear all feedback memory">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                            Clear Memory
+                            Clear All Feedback
                         </button>
                     </div>
                     <div class="card-body">
@@ -315,11 +353,27 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                         </div>
                         <div style="flex:1">
-                            <div class="card-title">Query Rejection Trends</div>
-                            <div class="card-subtitle">Enter a role to get averaged negative feedback insights from past candidates</div>
+                            <div class="card-title">Query Rejection Trends (LLM 256k Context Engine)</div>
+                            <div class="card-subtitle">Select a role or enter a custom job title to synthesize rejection trends across candidates</div>
                         </div>
                     </div>
                     <div class="card-body">
+                        <!-- Quick Role Selector Badges & Excel Sheet Filter -->
+                        <div class="role-badges-section" id="roleBadgesSection">
+                            <div class="role-badges-header" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                                <div class="role-badges-title" style="margin:0;">Available Feedback Roles:</div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <span style="font-size:11.5px; color:var(--text-muted); font-weight:600;">Filter by Excel Sheet:</span>
+                                    <select id="excelDatasetFilterSelect" class="sidebar-select" onchange="onDatasetFilterChange(this.value)" style="width:auto; min-width:180px; padding:5px 28px 5px 10px; font-size:12px;">
+                                        <option value="all">All Excel Sheets</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="role-badges-list" id="roleBadgesList">
+                                <span class="role-badge-empty">Upload an Excel sheet to view role chips</span>
+                            </div>
+                        </div>
+
                         <div class="intel-query-form">
                             <div class="intel-input-row">
                                 <input type="text" class="intel-role-input" id="intelRoleInput" placeholder="e.g. Accounts Agile Coach PM, Gen AI BA..." autocomplete="off" />
@@ -340,7 +394,7 @@
                         </div>
                         <div style="flex:1">
                             <div class="card-title" id="trendsResultTitle">Rejection Trends Analysis</div>
-                            <div class="card-subtitle" id="trendsResultSubtitle">Averaged insights from past candidates</div>
+                            <div class="card-subtitle" id="trendsResultSubtitle">Synthesized insights via Gemma 31B LLM Context Window</div>
                         </div>
                     </div>
                     <div class="card-body">
@@ -352,18 +406,141 @@
 
             </div><!-- /mode-intelligence -->
 
+            <!-- ============================================= -->
+            <!-- STATE 3: INTERVIEW QUESTION BANK SECTION -->
+            <!-- ============================================= -->
+            <div id="modeQuestionsSection" class="mode-section">
+                <div class="questions-container-full" style="width:100%;">
+                    <!-- WORKSPACE CARD -->
+                    <div class="questions-workspace-card card" id="questionsWorkspaceCard" style="display:block;">
+                        <!-- Tab Headers -->
+                        <div class="questions-tabs-header border-b">
+                            <div class="questions-active-role-info">
+                                <span class="role-label-prefix">Role:</span>
+                                <strong id="activeRoleNameHeader">Frontend Engineer</strong>
+                            </div>
+                            <div class="questions-tabs">
+                                <button class="questions-tab-btn active" id="questionsTabBtn_pack" onclick="switchQuestionsTab('pack')">
+                                    Question Pack
+                                </button>
+                                <button class="questions-tab-btn" id="questionsTabBtn_ingest" onclick="switchQuestionsTab('ingest')">
+                                    Ingest Feedback
+                                </button>
+                                <button class="questions-tab-btn" id="questionsTabBtn_generic" onclick="switchQuestionsTab('generic')">
+                                    Generic Bank
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- TAB CONTENT 1: QUESTION PACK -->
+                        <div id="questionsTabContent_pack" class="questions-tab-content active">
+                            <div class="tab-intro-row">
+                                <p class="tab-intro-text">
+                                    Blended list of 15–20 questions (prioritized active dynamic questions backfilled with static generic questions).
+                                </p>
+                                <button class="action-btn" onclick="copyQuestionPack()">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    <span id="copyPackBtnLabel">Copy Question Pack</span>
+                                </button>
+                            </div>
+
+                            <div class="pack-stats-row">
+                                <div class="pack-stat-badge stat-client">
+                                    <span class="dot"></span>
+                                    <span id="packClientCount">0 Client/Dynamic</span>
+                                </div>
+                                <div class="pack-stat-badge stat-generic">
+                                    <span class="dot"></span>
+                                    <span id="packGenericCount">0 Generic Backfills</span>
+                                </div>
+                            </div>
+
+                            <div class="pack-questions-list" id="packQuestionsList">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+
+                        <!-- TAB CONTENT 2: INGEST FEEDBACK -->
+                        <div id="questionsTabContent_ingest" class="questions-tab-content">
+                            <div class="ingest-form-wrapper">
+                                <label class="field-label" style="font-weight:600;margin-bottom:0.5rem;display:block;">Paste Raw Post-Interview Candidate Notes</label>
+                                <textarea id="rawNotesInput" class="form-textarea" placeholder="Enter notes here. Split multiple questions/topics into new lines. E.g.:&#10;- asked about DB index optimization&#10;- asked how I fit into HSBC's culture and ways of working&#10;- experience with Redis caching layers" style="min-height: 120px; font-size: 0.85rem; padding: 0.75rem; width:100%; box-sizing:border-box; margin-bottom: 0.5rem;"></textarea>
+                                
+                                <div class="generic-bank-tip" style="margin-bottom: 1rem;">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                    <span>Client Anonymization: Specific company names (e.g. Protiviti, Barclays, etc.) are automatically sanitized into <code>[Company]</code> so question packs remain neutral when shared across candidates.</span>
+                                </div>
+                                
+                                <button class="action-btn" id="refineFeedbackBtn" onclick="processRawFeedback()" style="width:100%; display:flex; justify-content:center; align-items:center; gap:0.5rem;">
+                                    <span>Process Feedback & Synthesize Questions</span>
+                                </button>
+
+                            </div>
+
+                            <!-- PREVIEW AREA (VERIFICATION SCREEN) -->
+                            <div id="feedbackPreviewArea" class="feedback-preview-area" style="display:none; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+                                <div class="preview-header-row" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                                    <div>
+                                        <h4 style="margin:0; font-size:0.95rem; color:var(--text-main);">AI-Refined Questions Preview</h4>
+                                        <p style="margin:0.25rem 0 0 0; font-size:0.75rem; color:var(--text-muted);">Review, deselect, or check matched duplicates before committing.</p>
+                                    </div>
+                                    <button class="action-btn success" id="commitFeedbackBtn" onclick="commitRefinedQuestions()" style="background:var(--emerald); border-color:var(--emerald);">
+                                        Confirm & Sync to DB
+                                    </button>
+                                </div>
+
+                                <div class="preview-questions-list" id="previewQuestionsList">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TAB CONTENT 3: GENERIC BANK CRUD -->
+                        <div id="questionsTabContent_generic" class="questions-tab-content">
+                            <div class="generic-bank-add-container" style="margin-bottom:1.5rem;">
+                                <div class="generic-bank-add-row" style="display:flex; gap:0.75rem; align-items:flex-start;">
+                                    <textarea id="addGenericQuestionInput" class="form-textarea" placeholder="Type or paste generic interview questions here (add one per line to upload multiple at once)..." rows="2" style="flex:1; padding: 0.65rem 0.85rem; resize:vertical; min-height:44px;"></textarea>
+                                    <button class="action-btn" onclick="saveGenericQuestion()" style="padding: 0.65rem 1rem; white-space:nowrap; height:44px;">
+                                        Add Question(s)
+                                    </button>
+                                </div>
+                                <div class="generic-bank-tip">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                    <span>Tip: You can add multiple generic questions at once by separating each question with a new line.</span>
+                                </div>
+                            </div>
+
+
+                            <div class="generic-questions-table-wrapper">
+                                <table class="generic-questions-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Question Text</th>
+                                            <th style="width:120px; text-align:right;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="genericQuestionsTableBody">
+                                        <!-- Populated dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SELECT ROLE PROMPT STATE -->
+                    <div class="questions-workspace-empty card" id="questionsWorkspaceEmpty">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-muted); margin-bottom:1rem;"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        <h4 style="margin:0 0 0.5rem 0; color:var(--text-main);">No Role Selected</h4>
+                        <p style="margin:0; font-size:0.8rem; color:var(--text-muted); text-align:center; max-width:260px;">
+                            Please select a role from the sidebar or define a new role to manage its generic and client questions.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
         </div><!-- /content-area -->
 
-        <!-- Footer -->
-        <footer class="bottom-bar">
-            <img
-                src="https://www.protiviti.com/themes/custom/protiviti/components/source/images/logo/gl-en.svg"
-                alt="Protiviti"
-                class="footer-logo"
-                onerror="this.style.display='none';"
-            />
-            <span class="footer-text">&copy; 2026 Protiviti Inc. · HR Automation Platform · Internal Use Only</span>
-        </footer>
+        </div><!-- /content-area -->
 
     </div><!-- /main-panel -->
 

@@ -105,6 +105,97 @@ async function loadSavedJDs() {
     }
 }
 
+async function loadSavedDatasets() {
+    try {
+        const res = await fetch("/api/feedback-datasets");
+        const list = await res.json();
+        renderSavedDatasets(list);
+    } catch (_) {
+        // silently fail
+    }
+}
+
+function renderSavedDatasets(list) {
+    const container = document.getElementById("savedFeedbackList");
+    const emptyEl   = document.getElementById("savedFeedbackEmpty");
+    if (!container) return;
+
+    Array.from(container.querySelectorAll(".saved-feedback-card")).forEach(el => el.remove());
+
+    if (!list || list.length === 0) {
+        if (emptyEl) emptyEl.style.display = "flex";
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = "none";
+
+    list.forEach(ds => {
+        const card = document.createElement("div");
+        card.className = "saved-jd-card saved-feedback-card";
+        card.dataset.id = ds.id;
+
+        const dateStr = ds.created_at ? new Date(ds.created_at.endsWith("Z") ? ds.created_at : ds.created_at + "Z").toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "";
+
+        const roleTags = (ds.roles || []).slice(0, 3).map(
+            r => `<span class="saved-jd-kw" style="background:rgba(52, 211, 153, 0.12); color:#34d399; font-size:10px;">${escHtml(r)}</span>`
+        ).join("");
+
+        card.innerHTML = `
+            <div class="saved-jd-card-title" title="${escHtml(ds.filename)}">📊 ${escHtml(ds.filename)}</div>
+            <div class="saved-jd-card-date">${ds.row_count} records · ${dateStr}</div>
+            ${roleTags ? `<div class="saved-jd-keywords" style="margin-top:4px;">${roleTags}</div>` : ""}
+            <button class="saved-jd-delete feedback-dataset-delete" data-id="${ds.id}" title="Delete sheet">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>`;
+
+        card.addEventListener("click", (e) => {
+            if (e.target.closest(".feedback-dataset-delete")) return;
+            viewDatasetDetails(ds.id);
+        });
+
+        const delBtn = card.querySelector(".feedback-dataset-delete");
+        if (delBtn) {
+            delBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                deleteDataset(ds.id);
+            });
+        }
+
+        container.appendChild(card);
+    });
+}
+
+async function deleteDataset(id) {
+    if (!confirm("Are you sure you want to delete this saved feedback sheet?")) return;
+    try {
+        const res = await fetch(`/api/feedback-datasets/${id}`, { method: "DELETE" });
+        if (res.ok) {
+            await loadSavedDatasets();
+            await loadFeedbackStats();
+        } else {
+            alert("Failed to delete feedback dataset.");
+        }
+    } catch (err) {
+        alert("Error deleting dataset: " + err.message);
+    }
+}
+
+async function viewDatasetDetails(id) {
+    if (typeof switchMode === 'function') switchMode('intelligence');
+    try {
+        const res = await fetch(`/api/feedback-datasets/${id}`);
+        const ds = await res.json();
+        if (ds && ds.roles && ds.roles.length > 0) {
+            const roleInput = document.getElementById("intelRoleInput");
+            if (roleInput) {
+                roleInput.value = ds.roles[0];
+                queryRejectionTrends();
+            }
+        }
+    } catch (_) {}
+}
+
 function renderSavedJDs(list) {
     const container = document.getElementById("savedJdList");
     const emptyEl   = document.getElementById("savedJdEmpty");
@@ -912,32 +1003,560 @@ function copyToClipboardWithFeedback(btnElement, text) {
 // SOURCING INTELLIGENCE — Mode Switch, Upload, Query
 // =============================================
 
-let currentMode = "analyzer"; // 'analyzer' or 'intelligence'
+let currentMode = "analyzer"; // 'analyzer', 'intelligence', or 'questions'
 
 function switchMode(mode) {
     currentMode = mode;
 
-    // Toggle mode sections
+    // Main workspace mode sections
     const analyzerSection = document.getElementById("modeAnalyzerSection");
     const intelSection = document.getElementById("modeIntelSection");
+    const questionsSection = document.getElementById("modeQuestionsSection");
+    
+    // Top bar toggle buttons
     const analyzerBtn = document.getElementById("modeAnalyzerBtn");
     const intelBtn = document.getElementById("modeIntelBtn");
+    const questionsBtn = document.getElementById("modeQuestionBankBtn");
+    
+    // Sidebar mode sections
+    const sbAnalyzer = document.getElementById("sidebarSectionAnalyzer");
+    const sbIntel = document.getElementById("sidebarSectionIntelligence");
+    const sbQuestions = document.getElementById("sidebarSectionQuestions");
+
     const title = document.getElementById("topBarTitle");
 
+    // Reset workspace visibility
+    if (analyzerSection) analyzerSection.classList.remove("active");
+    if (intelSection) intelSection.classList.remove("active");
+    if (questionsSection) questionsSection.classList.remove("active");
+
+    if (analyzerBtn) analyzerBtn.classList.remove("active");
+    if (intelBtn) intelBtn.classList.remove("active");
+    if (questionsBtn) questionsBtn.classList.remove("active");
+
+    // Reset sidebar visibility
+    if (sbAnalyzer) sbAnalyzer.classList.remove("active");
+    if (sbIntel) sbIntel.classList.remove("active");
+    if (sbQuestions) sbQuestions.classList.remove("active");
+
     if (mode === "analyzer") {
-        analyzerSection.classList.add("active");
-        intelSection.classList.remove("active");
-        analyzerBtn.classList.add("active");
-        intelBtn.classList.remove("active");
-        title.textContent = "Resume Analyser";
-    } else {
-        analyzerSection.classList.remove("active");
-        intelSection.classList.add("active");
-        analyzerBtn.classList.remove("active");
-        intelBtn.classList.add("active");
-        title.textContent = "Sourcing Intelligence";
-        // Load stats when entering intelligence mode
+        if (analyzerSection) analyzerSection.classList.add("active");
+        if (analyzerBtn) analyzerBtn.classList.add("active");
+        if (sbAnalyzer) sbAnalyzer.classList.add("active");
+        if (title) title.textContent = "Resume Analyser";
+        loadSavedJDs();
+    } else if (mode === "intelligence") {
+        if (intelSection) intelSection.classList.add("active");
+        if (intelBtn) intelBtn.classList.add("active");
+        if (sbIntel) sbIntel.classList.add("active");
+        if (title) title.textContent = "Sourcing Intelligence";
+        loadSavedDatasets();
         loadFeedbackStats();
+    } else if (mode === "questions") {
+        if (questionsSection) questionsSection.classList.add("active");
+        if (questionsBtn) questionsBtn.classList.add("active");
+        if (sbQuestions) sbQuestions.classList.add("active");
+        if (title) title.textContent = "Interview Question Bank";
+        loadQuestionBankRoles();
+    }
+}
+
+function uploadFeedbackExcelFromSidebar(inputEl) {
+    if (!inputEl || !inputEl.files || inputEl.files.length === 0) return;
+    _doFeedbackUpload(inputEl.files[0]);
+    inputEl.value = "";
+}
+
+
+// =============================================
+// INTERVIEW QUESTION BANK — Controller & CRUD
+// =============================================
+
+let activeQuestionsRole = null;
+let currentQuestionsTab = "pack";
+let refinedQuestionsPreviewList = [];
+
+// Load unique roles with banks
+async function loadQuestionBankRoles() {
+    try {
+        const res = await fetch("/api/question-bank/roles");
+        const data = await res.json();
+        
+        const listContainer = document.getElementById("sidebarRolesListGroup") || document.getElementById("rolesListGroup");
+        if (!listContainer) return;
+        
+        const roles = data.roles || [];
+        if (roles.length === 0) {
+            listContainer.innerHTML = '<div class="saved-jd-empty">No roles available.<br>Add one to begin.</div>';
+            return;
+        }
+        
+        listContainer.innerHTML = roles.map(role => `
+            <div class="saved-jd-card role-list-item ${activeQuestionsRole === role ? 'active' : ''}" onclick="selectQuestionBankRole('${escHtml(role).replace(/'/g, "\\'")}')">
+                <div class="saved-jd-card-title">${escHtml(role)}</div>
+            </div>
+        `).join("");
+
+        // Auto-select first role if none is active
+        if (!activeQuestionsRole && roles.length > 0) {
+            selectQuestionBankRole(roles[0]);
+        }
+    } catch (err) {
+        console.error("Failed to load roles", err);
+    }
+}
+
+// Select a role
+async function selectQuestionBankRole(role) {
+    activeQuestionsRole = role;
+    
+    // Highlight list item in sidebar
+    const items = document.querySelectorAll(".role-list-item");
+    items.forEach(item => item.classList.remove("active"));
+    const activeItem = Array.from(items).find(el => {
+        const titleEl = el.querySelector(".saved-jd-card-title") || el.querySelector(".role-list-item-name");
+        return titleEl && titleEl.textContent.trim() === role;
+    });
+    if (activeItem) activeItem.classList.add("active");
+    
+    // Setup workspace view
+    const workspaceCard = document.getElementById("questionsWorkspaceCard");
+    const roleHeader = document.getElementById("activeRoleNameHeader");
+
+    if (workspaceCard) workspaceCard.style.display = "block";
+    if (roleHeader) roleHeader.textContent = role;
+    
+    // Reset ingest form and previews
+    document.getElementById("rawNotesInput").value = "";
+    document.getElementById("feedbackPreviewArea").style.display = "none";
+    document.getElementById("previewQuestionsList").innerHTML = "";
+    refinedQuestionsPreviewList = [];
+    
+    // Switch to current active tab
+    switchQuestionsTab(currentQuestionsTab);
+}
+
+// Create new role bank
+async function createNewRoleBank() {
+    const input = document.getElementById("newRoleInput");
+    const role = input.value.trim();
+    if (!role) {
+        alert("Please enter a valid job role name.");
+        input.focus();
+        return;
+    }
+    
+    input.value = "";
+    await selectQuestionBankRole(role);
+    
+    // Add to list visually (or reload)
+    await loadQuestionBankRoles();
+    // Re-select to highlight
+    await selectQuestionBankRole(role);
+}
+
+// Switch Questions tab
+function switchQuestionsTab(tab) {
+    currentQuestionsTab = tab;
+    
+    const tabs = ["pack", "ingest", "generic"];
+    tabs.forEach(t => {
+        const btn = document.getElementById(`questionsTabBtn_${t}`);
+        const content = document.getElementById(`questionsTabContent_${t}`);
+        if (btn) {
+            if (t === tab) btn.classList.add("active");
+            else btn.classList.remove("active");
+        }
+        if (content) {
+            if (t === tab) content.classList.add("active");
+            else content.classList.remove("active");
+        }
+    });
+    
+    if (tab === "pack") {
+        loadQuestionPack();
+    } else if (tab === "generic") {
+        loadGenericQuestions();
+    }
+}
+
+// ── SUBTAB 1: QUESTION PACK ──────────────────────────────────────────────────
+
+let activePackQuestions = [];
+
+async function loadQuestionPack() {
+    if (!activeQuestionsRole) return;
+    
+    const listContainer = document.getElementById("packQuestionsList");
+    listContainer.innerHTML = '<div class="analysis-streaming">Generating question pack...</div>';
+    
+    try {
+        const res = await fetch(`/api/question-bank/pack?role_id=${encodeURIComponent(activeQuestionsRole)}`);
+        const data = await res.json();
+        
+        document.getElementById("packClientCount").textContent = `${data.client_count || 0} Client/Dynamic`;
+        document.getElementById("packGenericCount").textContent = `${data.questions.filter(q => q.type === "generic").length || 0} Generic Backfills`;
+        
+        const questions = data.questions || [];
+        activePackQuestions = questions;
+        
+        if (questions.length === 0) {
+            listContainer.innerHTML = '<div class="roles-list-empty">No questions generated. Ingest some feedback notes or add generic questions first!</div>';
+            return;
+        }
+        
+        listContainer.innerHTML = questions.map((q, idx) => {
+            const badgeType = q.type === "client" ? "client-badge" : "generic-badge";
+            const badgeLabel = q.type === "client" ? `Client (Asked ${q.frequency}x)` : "Generic Static";
+            return `
+                <div class="pack-question-item">
+                    <div class="pack-question-num">${idx + 1}</div>
+                    <div style="flex:1">
+                        <div class="pack-question-text">${escHtml(q.text)}</div>
+                        <span class="pack-question-badge ${badgeType}">${badgeLabel}</span>
+                    </div>
+                </div>
+            `;
+        }).join("");
+    } catch (err) {
+        listContainer.innerHTML = `<div class="roles-list-empty" style="color:var(--red-err)">Failed to load question pack.</div>`;
+    }
+}
+
+function copyQuestionPack() {
+    if (activePackQuestions.length === 0) return;
+    
+    const text = activePackQuestions.map((q, idx) => `${idx + 1}. ${q.text}`).join("\n");
+    const btn = document.getElementById("copyPackBtnLabel");
+    
+    navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = "Copy Question Pack"; }, 2000);
+    });
+}
+
+// ── SUBTAB 2: INGEST FEEDBACK ────────────────────────────────────────────────
+
+async function processRawFeedback() {
+    if (!activeQuestionsRole) return;
+    
+    const notesInput = document.getElementById("rawNotesInput");
+    const rawNotes = notesInput.value.trim();
+    if (!rawNotes) {
+        alert("Please paste some post-interview candidate notes first.");
+        notesInput.focus();
+        return;
+    }
+    
+    const refineBtn = document.getElementById("refineFeedbackBtn");
+    const previewArea = document.getElementById("feedbackPreviewArea");
+    const previewList = document.getElementById("previewQuestionsList");
+    
+    refineBtn.disabled = true;
+    refineBtn.innerHTML = '<div class="upload-progress-spinner" style="width:14px;height:14px"></div> Processing notes...';
+    previewArea.style.display = "none";
+    previewList.innerHTML = "";
+    
+    try {
+        const res = await fetch("/api/question-bank/refine-feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role_id: activeQuestionsRole, raw_notes: rawNotes })
+        });
+        const data = await res.json();
+        
+        if (!res.ok) {
+            alert("Error processing feedback: " + (data.detail || "Server error"));
+            return;
+        }
+        
+        refinedQuestionsPreviewList = data.refined || [];
+        if (refinedQuestionsPreviewList.length === 0) {
+            previewList.innerHTML = '<div class="roles-list-empty">AI did not extract any questions. Make sure the notes contain query descriptions.</div>';
+            previewArea.style.display = "block";
+            return;
+        }
+        
+        previewList.innerHTML = refinedQuestionsPreviewList.map((q, idx) => {
+            const isMatch = q.matched_id !== null;
+            const matchHtml = isMatch 
+                ? `<span class="preview-match-badge">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    Matched Existing Question
+                   </span>` 
+                : `<span class="preview-new-badge">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    New Synthesized Question
+                   </span>`;
+                
+            return `
+                <div class="preview-question-card" id="previewCard_${idx}">
+                    <div class="preview-card-header">
+                        <label class="preview-check-label">
+                            <input type="checkbox" id="checkRefined_${idx}" checked onchange="togglePreviewCardState(${idx})" class="preview-checkbox" />
+                            <span>Include in Sync</span>
+                        </label>
+                        <div class="preview-badge-wrapper">${matchHtml}</div>
+                    </div>
+                    <div class="preview-card-body">
+                        <div class="preview-raw-box">
+                            <span class="preview-raw-label">Raw Candidate Note</span>
+                            <span class="preview-raw-text">"${escHtml(q.raw_text)}"</span>
+                        </div>
+                        <div class="preview-edit-field-group">
+                            <label class="preview-field-label" for="cleanInput_${idx}">Refined Question (Editable):</label>
+                            <textarea id="cleanInput_${idx}" class="form-textarea preview-clean-input" rows="2">${escHtml(q.clean_text)}</textarea>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join("");
+        
+        previewArea.style.display = "block";
+    } catch (err) {
+        alert("Failed to connect to server: " + err.message);
+    } finally {
+        refineBtn.disabled = false;
+        refineBtn.innerHTML = "<span>Process Feedback & Synthesize Questions</span>";
+    }
+}
+
+function togglePreviewCardState(idx) {
+    const card = document.getElementById(`previewCard_${idx}`);
+    const check = document.getElementById(`checkRefined_${idx}`);
+    if (card && check) {
+        if (check.checked) {
+            card.classList.remove("deselected");
+        } else {
+            card.classList.add("deselected");
+        }
+    }
+}
+
+
+async function commitRefinedQuestions() {
+    if (!activeQuestionsRole || refinedQuestionsPreviewList.length === 0) return;
+    
+    const commitBtn = document.getElementById("commitFeedbackBtn");
+    commitBtn.disabled = true;
+    commitBtn.textContent = "Saving...";
+    
+    const approvedQuestions = [];
+    refinedQuestionsPreviewList.forEach((q, idx) => {
+        const checkbox = document.getElementById(`checkRefined_${idx}`);
+        const cleanInput = document.getElementById(`cleanInput_${idx}`);
+        
+        if (checkbox && checkbox.checked && cleanInput) {
+            approvedQuestions.push({
+                raw_text: q.raw_text,
+                clean_text: cleanInput.value.trim(),
+                matched_id: q.matched_id
+            });
+        }
+    });
+    
+    if (approvedQuestions.length === 0) {
+        alert("Please check at least one question to commit.");
+        commitBtn.disabled = false;
+        commitBtn.textContent = "Confirm & Sync to DB";
+        return;
+    }
+    
+    try {
+        const res = await fetch("/api/question-bank/commit-feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role_id: activeQuestionsRole, questions: approvedQuestions })
+        });
+        
+        const data = await res.json();
+        if (res.ok) {
+            alert(`Successfully synchronized! ${data.inserted} inserted, ${data.updated} updated. ${data.purged > 0 ? `Capping rule triggered: purged ${data.purged} oldest active questions.` : ""}`);
+            
+            // Clean state and switch back to pack tab
+            document.getElementById("rawNotesInput").value = "";
+            document.getElementById("feedbackPreviewArea").style.display = "none";
+            document.getElementById("previewQuestionsList").innerHTML = "";
+            refinedQuestionsPreviewList = [];
+            
+            switchQuestionsTab("pack");
+        } else {
+            alert("Error committing: " + (data.detail || "Server error"));
+        }
+    } catch (err) {
+        alert("Connection failed: " + err.message);
+    } finally {
+        commitBtn.disabled = false;
+        commitBtn.textContent = "Confirm & Sync to DB";
+    }
+}
+
+// ── SUBTAB 3: GENERIC CRUD ───────────────────────────────────────────────────
+
+async function loadGenericQuestions() {
+    if (!activeQuestionsRole) return;
+    
+    const tbody = document.getElementById("genericQuestionsTableBody");
+    tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;">Loading generic questions...</td></tr>';
+    
+    try {
+        const res = await fetch(`/api/question-bank/generic?role_id=${encodeURIComponent(activeQuestionsRole)}`);
+        const data = await res.json();
+        
+        const questions = data.questions || [];
+        if (questions.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);">No static generic questions defined for this role.</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = questions.map(q => `
+            <tr id="genRow_${q.id}">
+                <td style="vertical-align:middle;">
+                    <span class="gen-text-span" id="genTextSpan_${q.id}">${escHtml(q.question_text)}</span>
+                    <div class="gen-edit-container" id="genEditContainer_${q.id}" style="display:none; margin-top:0.25rem;">
+                        <textarea class="gen-edit-input form-textarea" id="genEditInput_${q.id}" rows="2" style="width:100%; box-sizing:border-box;">${escHtml(q.question_text)}</textarea>
+                    </div>
+                </td>
+                <td style="text-align:right; vertical-align:top; width:170px;">
+                    <div class="gen-action-row" style="display:flex; justify-content:flex-end; gap:0.4rem;">
+                        <button class="action-btn edit-btn" id="genEditBtn_${q.id}" onclick="toggleEditGeneric(${q.id})" style="padding:0.35rem 0.55rem; font-size:0.75rem;">
+                            Edit
+                        </button>
+                        <button class="action-btn success save-btn" id="genSaveBtn_${q.id}" onclick="saveEditGeneric(${q.id})" style="display:none; padding:0.35rem 0.55rem; font-size:0.75rem; background:var(--emerald); border-color:var(--emerald);">
+                            Save
+                        </button>
+                        <button class="action-btn cancel-btn" id="genCancelBtn_${q.id}" onclick="cancelEditGeneric(${q.id})" style="display:none; padding:0.35rem 0.55rem; font-size:0.75rem;">
+                            Cancel
+                        </button>
+                        <button class="action-btn danger-btn delete-btn" id="genDelBtn_${q.id}" onclick="deleteGenericQuestion(${q.id})" style="padding:0.35rem 0.55rem; font-size:0.75rem;">
+                            Delete
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `).join("");
+    } catch (err) {
+        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--red-err)">Failed to load generic questions.</td></tr>';
+    }
+}
+
+async function saveGenericQuestion() {
+    if (!activeQuestionsRole) return;
+    
+    const input = document.getElementById("addGenericQuestionInput");
+    const text = input.value.trim();
+    if (!text) {
+        alert("Please enter at least one generic question.");
+        input.focus();
+        return;
+    }
+    
+    try {
+        const res = await fetch("/api/question-bank/generic", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role_id: activeQuestionsRole, question_text: text })
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            input.value = "";
+            await loadGenericQuestions();
+            await loadQuestionBankRoles();
+        } else {
+            const errData = await res.json().catch(() => ({}));
+            alert(errData.detail || "Failed to add question(s).");
+        }
+    } catch (err) {
+        alert("Connection error: " + err.message);
+    }
+}
+
+function toggleEditGeneric(id) {
+    const span = document.getElementById(`genTextSpan_${id}`);
+    const editContainer = document.getElementById(`genEditContainer_${id}`);
+    const editInput = document.getElementById(`genEditInput_${id}`);
+    const row = document.getElementById(`genRow_${id}`);
+    const editBtn = document.getElementById(`genEditBtn_${id}`);
+    const saveBtn = document.getElementById(`genSaveBtn_${id}`);
+    const cancelBtn = document.getElementById(`genCancelBtn_${id}`);
+    const delBtn = document.getElementById(`genDelBtn_${id}`);
+    
+    if (span) span.style.display = "none";
+    if (editContainer) editContainer.style.display = "block";
+    if (row) row.classList.add("editing-row");
+    if (editBtn) editBtn.style.display = "none";
+    if (delBtn) delBtn.style.display = "none";
+    if (saveBtn) saveBtn.style.display = "inline-block";
+    if (cancelBtn) cancelBtn.style.display = "inline-block";
+    if (editInput) {
+        editInput.focus();
+        editInput.setSelectionRange(editInput.value.length, editInput.value.length);
+    }
+}
+
+function cancelEditGeneric(id) {
+    const span = document.getElementById(`genTextSpan_${id}`);
+    const editContainer = document.getElementById(`genEditContainer_${id}`);
+    const editInput = document.getElementById(`genEditInput_${id}`);
+    const row = document.getElementById(`genRow_${id}`);
+    const editBtn = document.getElementById(`genEditBtn_${id}`);
+    const saveBtn = document.getElementById(`genSaveBtn_${id}`);
+    const cancelBtn = document.getElementById(`genCancelBtn_${id}`);
+    const delBtn = document.getElementById(`genDelBtn_${id}`);
+    
+    if (span) {
+        span.style.display = "inline";
+        if (editInput) editInput.value = span.textContent;
+    }
+    if (editContainer) editContainer.style.display = "none";
+    if (row) row.classList.remove("editing-row");
+    if (editBtn) editBtn.style.display = "inline-block";
+    if (delBtn) delBtn.style.display = "inline-block";
+    if (saveBtn) saveBtn.style.display = "none";
+    if (cancelBtn) cancelBtn.style.display = "none";
+}
+
+async function saveEditGeneric(id) {
+    const input = document.getElementById(`genEditInput_${id}`);
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) {
+        alert("Question text cannot be empty.");
+        input.focus();
+        return;
+    }
+    
+    try {
+        const res = await fetch(`/api/question-bank/generic/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question_text: text })
+        });
+        
+        if (res.ok) {
+            await loadGenericQuestions();
+        } else {
+            alert("Failed to save changes.");
+        }
+    } catch (err) {
+        alert("Connection error: " + err.message);
+    }
+}
+
+
+async function deleteGenericQuestion(id) {
+    if (!confirm("Are you sure you want to delete this generic question?")) return;
+    
+    try {
+        const res = await fetch(`/api/question-bank/generic/${id}`, { method: "DELETE" });
+        if (res.ok) {
+            await loadGenericQuestions();
+        } else {
+            alert("Failed to delete question.");
+        }
+    } catch (err) {
+        alert("Connection error: " + err.message);
     }
 }
 
@@ -978,7 +1597,7 @@ async function _doFeedbackUpload(file) {
     resultEl.innerHTML = `
         <div class="upload-progress">
             <div class="upload-progress-spinner"></div>
-            <span>Processing <strong>${escHtml(file.name)}</strong>... Embedding feedback into vector memory</span>
+            <span>Processing <strong>${escHtml(file.name)}</strong>... Storing candidate feedback into SQLite dataset store</span>
         </div>
     `;
 
@@ -1004,15 +1623,16 @@ async function _doFeedbackUpload(file) {
             <div class="upload-result-success">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 <div>
-                    <strong>${data.processed}</strong> feedback entries synced to vector memory
+                    <strong>${data.processed}</strong> feedback records saved to SQLite dataset store
                     ${data.skipped > 0 ? `<span class="upload-skipped">(${data.skipped} rows skipped — missing status/feedback)</span>` : ""}
                     <div class="upload-roles-found">${rolesHtml}</div>
                 </div>
             </div>
         `;
 
-        // Reload stats
-        loadFeedbackStats();
+        // Reload stats and sidebar datasets
+        await loadFeedbackStats();
+        await loadSavedDatasets();
 
     } catch (err) {
         resultEl.innerHTML = `
@@ -1027,19 +1647,36 @@ async function _doFeedbackUpload(file) {
     document.getElementById("feedbackFileInput").value = "";
 }
 
-// --- Load Feedback Stats ---
+// --- Load Feedback Stats & Role Badges ---
 async function loadFeedbackStats() {
     const panel = document.getElementById("feedbackStatsPanel");
+    const badgesList = document.getElementById("roleBadgesList");
+    
     try {
         const res = await fetch("/api/feedback-stats");
         const data = await res.json();
 
         if (!data.total || data.total === 0) {
-            panel.style.display = "none";
+            if (panel) panel.style.display = "none";
+            if (badgesList) badgesList.innerHTML = `<span class="role-badge-empty">Upload an Excel sheet to view role chips</span>`;
             return;
         }
 
         const roles = data.roles;
+        const roleKeys = Object.keys(roles);
+
+        // Update Role Chips for quick filtering
+        const chipsHtml = roleKeys.map(role => `
+            <button class="role-chip-btn" onclick="selectRoleChip('${escHtml(role)}')">
+                <span>${escHtml(role)}</span>
+                <span class="chip-count-tag">${roles[role].total}</span>
+            </button>
+        `).join("");
+
+        if (badgesList && (!selectedDatasetId || selectedDatasetId === "all")) {
+            badgesList.innerHTML = chipsHtml;
+        }
+
         const roleCards = Object.entries(roles).map(([role, counts]) => `
             <div class="stats-role-card">
                 <div class="stats-role-name">${escHtml(role)}</div>
@@ -1051,16 +1688,165 @@ async function loadFeedbackStats() {
             </div>
         `).join("");
 
-        panel.style.display = "block";
-        panel.innerHTML = `
-            <div class="stats-header">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                Vector Memory — ${data.total} entries across ${Object.keys(roles).length} roles
-            </div>
-            <div class="stats-roles-grid">${roleCards}</div>
-        `;
+        if (panel) {
+            panel.style.display = "block";
+            panel.innerHTML = `
+                <div class="stats-header">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                    SQLite Intelligence Store — ${data.total} records across ${roleKeys.length} roles
+                </div>
+                <div class="stats-roles-grid">${roleCards}</div>
+            `;
+        }
     } catch (err) {
-        panel.style.display = "none";
+        if (panel) panel.style.display = "none";
+    }
+}
+
+// ── SAVED FEEDBACK DATASETS & EXCEL SHEET FILTER ──────────────────────────
+
+let allFeedbackDatasets = [];
+let selectedDatasetId = "all";
+
+async function loadSavedDatasets() {
+    try {
+        const res = await fetch("/api/feedback-datasets");
+        if (!res.ok) return;
+        allFeedbackDatasets = await res.json();
+        renderSavedDatasets(allFeedbackDatasets);
+        populateExcelDatasetFilterDropdown(allFeedbackDatasets);
+    } catch (err) {
+        console.error("Failed to load feedback datasets:", err);
+    }
+}
+
+function renderSavedDatasets(datasets) {
+    const listContainer = document.getElementById("savedFeedbackList");
+    const emptyEl = document.getElementById("savedFeedbackEmpty");
+    if (!listContainer) return;
+
+    // Clear existing cards
+    Array.from(listContainer.querySelectorAll(".saved-jd-card")).forEach(el => el.remove());
+
+    if (!datasets || datasets.length === 0) {
+        if (emptyEl) emptyEl.style.display = "flex";
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = "none";
+
+    datasets.forEach(ds => {
+        const card = document.createElement("div");
+        card.className = `saved-jd-card saved-feedback-card ${selectedDatasetId == ds.id ? 'active' : ''}`;
+        card.dataset.id = ds.id;
+
+        const date = new Date(ds.created_at);
+        const dateStr = date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+        card.innerHTML = `
+            <div class="saved-jd-card-title" title="${escHtml(ds.filename)}">${escHtml(ds.filename)}</div>
+            <div class="saved-jd-card-date">${ds.row_count} rows · ${dateStr}</div>
+            <div class="saved-jd-keywords" style="margin-top:2px;">
+                <span class="saved-jd-kw" style="background:rgba(52, 211, 153, 0.12); color:#34d399; border-color:rgba(52, 211, 153, 0.2);">
+                    ${ds.roles ? ds.roles.length : 0} roles
+                </span>
+            </div>
+            <button class="saved-jd-delete" title="Delete Dataset" onclick="deleteFeedbackDataset(${ds.id}, event)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        `;
+
+        card.addEventListener("click", (e) => {
+            if (e.target.closest(".saved-jd-delete")) return;
+            selectDatasetFilter(ds.id);
+        });
+
+        listContainer.appendChild(card);
+    });
+}
+
+function populateExcelDatasetFilterDropdown(datasets) {
+    const select = document.getElementById("excelDatasetFilterSelect");
+    if (!select) return;
+
+    const currentVal = select.value || "all";
+    let optionsHtml = `<option value="all">All Excel Sheets (${datasets.reduce((acc, d) => acc + d.row_count, 0)} records)</option>`;
+
+    datasets.forEach(ds => {
+        optionsHtml += `<option value="${ds.id}">${escHtml(ds.filename)} (${ds.row_count} rows)</option>`;
+    });
+
+    select.innerHTML = optionsHtml;
+    select.value = currentVal;
+}
+
+function onDatasetFilterChange(val) {
+    selectedDatasetId = val;
+    // Highlight sidebar active dataset
+    const cards = document.querySelectorAll(".saved-feedback-card");
+    cards.forEach(c => c.classList.remove("active"));
+    if (val !== "all") {
+        const activeCard = Array.from(cards).find(c => c.dataset.id == val);
+        if (activeCard) activeCard.classList.add("active");
+    }
+    filterRolesByDataset(val);
+}
+
+function selectDatasetFilter(datasetId) {
+    const select = document.getElementById("excelDatasetFilterSelect");
+    if (select) {
+        select.value = datasetId;
+        onDatasetFilterChange(datasetId);
+    }
+}
+
+function filterRolesByDataset(datasetId) {
+    const badgesList = document.getElementById("roleBadgesList");
+    if (!badgesList) return;
+
+    if (datasetId === "all" || !allFeedbackDatasets.length) {
+        selectedDatasetId = "all";
+        loadFeedbackStats(); // Reload full role chips list
+        return;
+    }
+
+    const ds = allFeedbackDatasets.find(d => d.id == datasetId);
+    if (!ds || !ds.roles || ds.roles.length === 0) {
+        badgesList.innerHTML = `<span class="role-badge-empty">No roles found in this sheet</span>`;
+        return;
+    }
+
+    badgesList.innerHTML = ds.roles.map(role => `
+        <button class="role-chip-btn" onclick="selectRoleChip('${escHtml(role)}')">
+            <span>${escHtml(role)}</span>
+            <span class="chip-count-tag" style="background:rgba(52, 211, 153, 0.2); color:#34d399;">Sheet ${ds.id}</span>
+        </button>
+    `).join("");
+}
+
+async function deleteFeedbackDataset(id, event) {
+    if (event) event.stopPropagation();
+    if (!confirm("Delete this saved feedback sheet? This action cannot be undone.")) return;
+
+    try {
+        const res = await fetch(`/api/feedback-datasets/${id}`, { method: "DELETE" });
+        if (res.ok) {
+            await loadSavedDatasets();
+            await loadFeedbackStats();
+        } else {
+            alert("Failed to delete dataset.");
+        }
+    } catch (err) {
+        alert("Error deleting dataset: " + err.message);
+    }
+}
+
+function selectRoleChip(roleName) {
+    const input = document.getElementById("intelRoleInput");
+    if (input) {
+        input.value = roleName;
+        queryRejectionTrends();
     }
 }
 
@@ -1085,7 +1871,7 @@ async function queryRejectionTrends() {
     resultBody.innerHTML = `
         <div class="intel-loading">
             <div class="upload-progress-spinner"></div>
-            <span>Searching vector memory for <strong>${escHtml(role)}</strong> rejection patterns...</span>
+            <span>Synthesizing rejection trends for <strong>${escHtml(role)}</strong> via Gemma 31B Context Window...</span>
         </div>
     `;
 
@@ -1222,7 +2008,7 @@ function copyRefinementText() {
 
 // --- Clear Vector Memory ---
 async function clearVectorMemory() {
-    if (!confirm("Are you sure you want to clear all candidate feedback from vector memory? This action cannot be undone.")) {
+    if (!confirm("Are you sure you want to clear all candidate feedback from the intelligence store? This action cannot be undone.")) {
         return;
     }
 
@@ -1231,7 +2017,7 @@ async function clearVectorMemory() {
         const data = await res.json();
 
         if (res.ok) {
-            alert(data.message || "Vector memory cleared successfully.");
+            alert(data.message || "Feedback store cleared successfully.");
             
             // Clear stats display
             const statsPanel = document.getElementById("feedbackStatsPanel");
@@ -1252,10 +2038,20 @@ async function clearVectorMemory() {
                 uploadResult.style.display = "none";
                 uploadResult.innerHTML = "";
             }
+
+            await loadSavedDatasets();
+            await loadFeedbackStats();
         } else {
-            alert("Error clearing vector memory: " + (data.detail || "Server error"));
+            alert("Error clearing feedback store: " + (data.detail || "Server error"));
         }
     } catch (err) {
         alert("Failed to connect to server: " + err.message);
     }
 }
+
+// Initial load on page ready
+document.addEventListener("DOMContentLoaded", function () {
+    loadSavedJDs();
+    loadSavedDatasets();
+    loadFeedbackStats();
+});
