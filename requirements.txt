@@ -6,3 +6,4 @@ python-dotenv==1.2.2
 PyMuPDF==1.28.0
 python-multipart==0.0.32
 openpyxl
+python-pptx==1.0.1

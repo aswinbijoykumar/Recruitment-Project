@@ -30,8 +30,10 @@ function newChat() {
     document.getElementById("outputMeta").textContent = "Ready";
 
     // Reset stats
-    document.getElementById("tokenCount").textContent = "—";
-    document.getElementById("timeCount").textContent  = "—";
+    const tokenDisplay = document.getElementById("tokenCount");
+    const timeDisplay  = document.getElementById("timeCount");
+    if (tokenDisplay) tokenDisplay.textContent = "—";
+    if (timeDisplay) timeDisplay.textContent  = "—";
 
     // Reset status
     setStatus("ready", "System Ready");
@@ -47,10 +49,14 @@ function newChat() {
 function setStatus(state, text) {
     const dot   = document.getElementById("statusDot");
     const label = document.getElementById("statusLabel");
-    dot.className = "status-dot";
-    if (state === "processing") dot.classList.add("processing");
-    if (state === "error")      dot.classList.add("error");
-    label.textContent = text;
+    if (dot) {
+        dot.className = "status-dot";
+        if (state === "processing") dot.classList.add("processing");
+        if (state === "error")      dot.classList.add("error");
+    }
+    if (label) {
+        label.textContent = text;
+    }
 }
 
 // =============================================
@@ -343,6 +349,93 @@ function exportOutput() {
     URL.revokeObjectURL(url);
 }
 
+// --- Export .pdf ---
+function exportPDF() {
+    try {
+        const jdElement = document.getElementById("jdOutput");
+        if (!jdElement) {
+            alert("JD Output element not found.");
+            return;
+        }
+        
+        const text = jdElement.innerText || jdElement.textContent;
+        if (!text.trim()) {
+            alert("No JD text to export.");
+            return;
+        }
+
+        // If jsPDF is not loaded yet, try to load it dynamically
+        if (typeof window.jspdf === 'undefined') {
+            console.log("jsPDF not loaded. Attempting dynamic load...");
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+            script.onload = () => {
+                console.log("jsPDF loaded successfully via dynamic fallback.");
+                exportPDF();
+            };
+            script.onerror = () => {
+                alert("Failed to load PDF generation library (jsPDF). Please check your internet connection.");
+            };
+            document.head.appendChild(script);
+            return;
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({
+            orientation: 'portrait',
+            unit: 'mm',
+            format: 'a4'
+        });
+
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const margin = 20;
+        const maxLineWidth = pageWidth - (margin * 2);
+        
+        // Split the entire text into lines that wrap nicely
+        const lines = doc.splitTextToSize(text, maxLineWidth);
+        
+        let cursorY = margin;
+        const lineHeight = 6.5; // spacing in mm
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(33, 37, 41); // professional dark slate color
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Simple page breaking
+            if (cursorY + lineHeight > pageHeight - margin) {
+                doc.addPage();
+                cursorY = margin;
+            }
+
+            // Detect if line is a header to bold it slightly
+            const cleanLine = line.trim().replace(/^[-*•\s]+/, '');
+            const isHeader = /^(Job Title|Role Overview|Key Responsibilities|Required Skills & Qualifications|Required Skills and Qualifications|Preferred Experience):?$/i.test(cleanLine);
+            if (isHeader) {
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(11);
+                doc.setTextColor(13, 27, 46); // Brand dark navy color
+                cursorY += 2; // Extra spacing before header
+            } else {
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(10);
+                doc.setTextColor(33, 37, 41);
+            }
+
+            doc.text(line, margin, cursorY);
+            cursorY += lineHeight;
+        }
+
+        doc.save("Protiviti_JD_" + Date.now() + ".pdf");
+    } catch (e) {
+        console.error("PDF generation failed:", e);
+        alert("Failed to export PDF: " + e.message);
+    }
+}
+
 // --- Main Submission Handler ---
 async function submitClientDemands() {
     const textValue = clientInput.value.trim();
@@ -365,8 +458,8 @@ async function submitClientDemands() {
 
     outputContainer.classList.add("visible");
     setStatus("processing", "Generating…");
-    tokenDisplay.textContent = "0";
-    timeDisplay.textContent  = "0.0s";
+    if (tokenDisplay) tokenDisplay.textContent = "0";
+    if (timeDisplay) timeDisplay.textContent  = "0.0s";
 
     // Smooth scroll to output
     setTimeout(() => {
@@ -376,7 +469,7 @@ async function submitClientDemands() {
     // Timer
     const startTime = Date.now();
     let timerInterval = setInterval(() => {
-        timeDisplay.textContent = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
+        if (timeDisplay) timeDisplay.textContent = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
     }, 100);
 
     try {
@@ -398,7 +491,7 @@ async function submitClientDemands() {
             const chunk = textDecoder.decode(value, { stream: true });
             outputWindow.textContent += chunk;
             totalBytes += value.length;
-            tokenDisplay.textContent = Math.round(totalBytes / 4);
+            if (tokenDisplay) tokenDisplay.textContent = Math.round(totalBytes / 4);
         }
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -1003,7 +1096,8 @@ function copyToClipboardWithFeedback(btnElement, text) {
 // SOURCING INTELLIGENCE — Mode Switch, Upload, Query
 // =============================================
 
-let currentMode = "analyzer"; // 'analyzer', 'intelligence', or 'questions'
+let currentMode = "analyzer"; // 'analyzer', 'intelligence', 'questions', or 'client_ppt'
+let currentClientProfileData = null;
 
 function switchMode(mode) {
     currentMode = mode;
@@ -1012,16 +1106,19 @@ function switchMode(mode) {
     const analyzerSection = document.getElementById("modeAnalyzerSection");
     const intelSection = document.getElementById("modeIntelSection");
     const questionsSection = document.getElementById("modeQuestionsSection");
+    const clientPptSection = document.getElementById("modeClientPptSection");
     
     // Top bar toggle buttons
     const analyzerBtn = document.getElementById("modeAnalyzerBtn");
     const intelBtn = document.getElementById("modeIntelBtn");
     const questionsBtn = document.getElementById("modeQuestionBankBtn");
+    const clientPptBtn = document.getElementById("modeClientPptBtn");
     
     // Sidebar mode sections
     const sbAnalyzer = document.getElementById("sidebarSectionAnalyzer");
     const sbIntel = document.getElementById("sidebarSectionIntelligence");
     const sbQuestions = document.getElementById("sidebarSectionQuestions");
+    const sbClientPpt = document.getElementById("sidebarSectionClientPpt");
 
     const title = document.getElementById("topBarTitle");
 
@@ -1029,15 +1126,18 @@ function switchMode(mode) {
     if (analyzerSection) analyzerSection.classList.remove("active");
     if (intelSection) intelSection.classList.remove("active");
     if (questionsSection) questionsSection.classList.remove("active");
+    if (clientPptSection) clientPptSection.classList.remove("active");
 
     if (analyzerBtn) analyzerBtn.classList.remove("active");
     if (intelBtn) intelBtn.classList.remove("active");
     if (questionsBtn) questionsBtn.classList.remove("active");
+    if (clientPptBtn) clientPptBtn.classList.remove("active");
 
     // Reset sidebar visibility
     if (sbAnalyzer) sbAnalyzer.classList.remove("active");
     if (sbIntel) sbIntel.classList.remove("active");
     if (sbQuestions) sbQuestions.classList.remove("active");
+    if (sbClientPpt) sbClientPpt.classList.remove("active");
 
     if (mode === "analyzer") {
         if (analyzerSection) analyzerSection.classList.add("active");
@@ -1058,6 +1158,383 @@ function switchMode(mode) {
         if (sbQuestions) sbQuestions.classList.add("active");
         if (title) title.textContent = "Interview Question Bank";
         loadQuestionBankRoles();
+    } else if (mode === "client_ppt") {
+        if (clientPptSection) clientPptSection.classList.add("active");
+        if (clientPptBtn) clientPptBtn.classList.add("active");
+        if (sbClientPpt) sbClientPpt.classList.add("active");
+        if (title) title.textContent = "Client PPT Profile Generator";
+        loadSavedClientPptHistory();
+    }
+}
+
+function onClientCvFileSelected(input) {
+    const label = document.getElementById("clientCvFileName");
+    if (input.files && input.files[0]) {
+        label.innerHTML = `Selected: <strong>${escHtml(input.files[0].name)}</strong>`;
+    } else {
+        label.textContent = "Choose or drag candidate CV file";
+    }
+}
+
+function onClientJdFileSelected(input) {
+    const label = document.getElementById("clientJdFileName");
+    if (input.files && input.files[0]) {
+        label.innerHTML = `Selected JD: <strong>${escHtml(input.files[0].name)}</strong>`;
+    } else {
+        label.textContent = "Upload JD File (PDF, DOCX, TXT)";
+    }
+}
+
+function resetClientPptForm() {
+    const fileInput = document.getElementById("clientCvFileInput");
+    const fileLabel = document.getElementById("clientCvFileName");
+    const jdFileInput = document.getElementById("clientJdFileInput");
+    const jdFileLabel = document.getElementById("clientJdFileName");
+    const jdInput = document.getElementById("clientJdInput");
+    const resultCard = document.getElementById("clientPptResultCard");
+
+    if (fileInput) fileInput.value = "";
+    if (fileLabel) fileLabel.textContent = "Choose or drag candidate CV file";
+    if (jdFileInput) jdFileInput.value = "";
+    if (jdFileLabel) jdFileLabel.textContent = "Upload JD File (PDF, DOCX, TXT)";
+    if (jdInput) jdInput.value = "";
+    if (resultCard) resultCard.style.display = "none";
+    currentClientProfileData = null;
+}
+
+// Local Storage for Client Profile Decks
+function saveClientPptToHistory(data) {
+    try {
+        let history = JSON.parse(localStorage.getItem("client_ppt_history") || "[]");
+        const rawName = data.candidate_name || "Candidate Profile";
+        
+        // Count existing occurrences of candidate_name to append suffix like (1), (2)
+        const matchCount = history.filter(i => {
+            const baseName = (i.candidate_name || "").replace(/\s\(\d+\)$/, "");
+            return baseName.toLowerCase() === rawName.toLowerCase();
+        }).length;
+
+        const displayName = matchCount > 0 ? `${rawName} (${matchCount})` : rawName;
+
+        const newItem = {
+            id: Date.now(),
+            candidate_name: displayName,
+            grade_band: data.grade_band || "",
+            timestamp: new Date().toLocaleDateString(),
+            payload: data
+        };
+        history.unshift(newItem);
+        if (history.length > 25) history = history.slice(0, 25);
+        localStorage.setItem("client_ppt_history", JSON.stringify(history));
+        loadSavedClientPptHistory();
+    } catch (e) {
+        console.error("Failed to save client PPT history", e);
+    }
+}
+
+function loadSavedClientPptHistory() {
+    const listContainer = document.getElementById("savedClientPptList");
+    if (!listContainer) return;
+    try {
+        const history = JSON.parse(localStorage.getItem("client_ppt_history") || "[]");
+        if (history.length === 0) {
+            listContainer.innerHTML = `
+                <div class="saved-jd-empty">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                    <span>Generate your first profile to save decks.</span>
+                </div>`;
+            return;
+        }
+
+        listContainer.innerHTML = history.map(item => `
+            <div class="saved-jd-card" style="display:flex; align-items:center; justify-space-between; padding:8px 10px; gap:8px;">
+                <div style="flex:1; cursor:pointer; overflow:hidden;" onclick="redownloadSavedClientPpt(${item.id})">
+                    <div class="saved-jd-card-title" style="font-size:12px; font-weight:700; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(item.candidate_name)}</div>
+                    <div style="font-size:10px; color:var(--text-muted);">${escHtml(item.grade_band || "Client Profile")} · ${item.timestamp}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <button onclick="redownloadSavedClientPpt(${item.id})" title="Re-download PPTX" style="background:none; border:none; color:#0096c8; cursor:pointer; padding:3px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button onclick="deleteClientPptHistory(${item.id}, event)" title="Delete saved profile" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:3px;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--text-muted)'">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+        `).join("");
+    } catch (e) {
+        console.error("Failed to load saved client PPT history", e);
+    }
+}
+
+function deleteClientPptHistory(id, event) {
+    if (event) event.stopPropagation();
+    try {
+        let history = JSON.parse(localStorage.getItem("client_ppt_history") || "[]");
+        history = history.filter(i => i.id !== id);
+        localStorage.setItem("client_ppt_history", JSON.stringify(history));
+        loadSavedClientPptHistory();
+    } catch (e) {
+        console.error("Failed to delete client PPT history item", e);
+    }
+}
+
+async function redownloadSavedClientPpt(id) {
+    try {
+        const history = JSON.parse(localStorage.getItem("client_ppt_history") || "[]");
+        const item = history.find(i => i.id === id);
+        if (!item) return;
+
+        const pptxRes = await fetch("/api/client-profile/download-pptx", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(item.payload),
+        });
+
+        if (!pptxRes.ok) {
+            alert("Failed to prepare presentation download.");
+            return;
+        }
+
+        const blob = await pptxRes.blob();
+        const candName = item.candidate_name || "Candidate Profile";
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${candName} CV.pptx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert("Failed to re-download: " + e.message);
+    }
+}
+
+async function generateClientProfile() {
+    const cvFileInput = document.getElementById("clientCvFileInput");
+    const jdFileInput = document.getElementById("clientJdFileInput");
+    const jdInput = document.getElementById("clientJdInput");
+    const btn = document.getElementById("generateClientPptBtn");
+    const resultCard = document.getElementById("clientPptResultCard");
+
+    if (!cvFileInput.files || cvFileInput.files.length === 0) {
+        alert("Please select a candidate CV file (PDF, DOCX, or TXT).");
+        return;
+    }
+
+    const hasJdFile = jdFileInput && jdFileInput.files && jdFileInput.files.length > 0;
+    const jdText = jdInput ? jdInput.value.trim() : "";
+
+    if (!hasJdFile && !jdText) {
+        alert("Please provide the target Job Description (JD) by uploading a file (PDF, DOCX) or entering text.");
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = `<div class="upload-progress-spinner" style="width:16px;height:16px;"></div> Generating Client Submission Profile...`;
+
+    const formData = new FormData();
+    formData.append("file", cvFileInput.files[0]);
+    if (hasJdFile) {
+        formData.append("jd_file", jdFileInput.files[0]);
+    }
+    if (jdText) {
+        formData.append("jd_text", jdText);
+    }
+
+    try {
+        const res = await fetch("/api/client-profile/generate", {
+            method: "POST",
+            body: formData,
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            alert("Error: " + (data.detail || "Failed to generate profile."));
+            return;
+        }
+
+        currentClientProfileData = data;
+        
+        // Trigger Direct Download of PPTX Presentation Deck
+        const pptxRes = await fetch("/api/client-profile/download-pptx", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+        });
+
+        if (!pptxRes.ok) {
+            alert("Failed to prepare presentation download.");
+            return;
+        }
+
+        const blob = await pptxRes.blob();
+        const candName = data.candidate_name || "Candidate Profile";
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${candName} CV.pptx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        saveClientPptToHistory(data);
+
+    } catch (err) {
+        alert("Network error: " + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Generate Client Profile (PPT Format)`;
+    }
+}
+
+function renderClientProfilePreview(data) {
+    const candNameEl = document.getElementById("clientPptCandName");
+    const candExpEl = document.getElementById("clientPptCandExp");
+    const resultBody = document.getElementById("clientPptResultBody");
+
+    const candName = data.candidate_name || "Candidate Profile";
+    const gradeBand = data.grade_band || "GCB 4";
+
+    if (candNameEl) candNameEl.textContent = candName;
+    if (candExpEl) candExpEl.textContent = `Grade / Band: ${gradeBand} · Client Submission Ready`;
+
+    const summaryHtml = escHtml(data.professional_summary || "");
+
+    const kwListHtml = (data.areas_of_expertise || []).slice(0, 20).map(kw => `
+        <li style="margin-bottom:3px; color:#1e293b;">${escHtml(kw)}</li>
+    `).join("");
+
+    const indListHtml = (data.industry_expertise || []).slice(0, 4).map(ind => `
+        <li style="margin-bottom:3px; color:#1e293b;">${escHtml(ind)}</li>
+    `).join("");
+
+    const edListHtml = ((data.education && data.education.length > 0) ? data.education : ["Bachelor of Engineering / Related Field"]).map(ed => `
+        <li style="margin-bottom:3px; color:#1e293b;">${escHtml(ed)}</li>
+    `).join("");
+
+    const projHtml = (data.major_projects || []).slice(0, 4).map(p => `
+        <div style="margin-bottom:12px;">
+            <div style="font-size:12.5px; font-weight:800; color:#0b3b60; margin-bottom:4px;">
+                ${escHtml(p.industry_desc || "Organization")} – ${escHtml(p.project_theme || "Project")} – ${escHtml(p.role || "Consultant")}
+            </div>
+            <ul style="margin:0; padding-left:18px; color:#1e293b; font-size:11.5px; line-height:1.5;">
+                ${(p.bullets || []).slice(0, 4).map(b => `<li>${escHtml(b)}</li>`).join("")}
+            </ul>
+        </div>
+    `).join("");
+
+    resultBody.innerHTML = `
+        <div style="background:#ffffff; border-radius:6px; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,0.3); color:#1e293b; font-family:Arial, sans-serif; display:flex; min-height:540px; position:relative;">
+            
+            <!-- LEFT BLUE SIDEBAR -->
+            <div style="width:240px; background:#0b3b60; color:#ffffff; padding:40px 24px; display:flex; flex-direction:column; justify-content:center; flex-shrink:0;">
+                <div style="font-size:26px; font-weight:800; line-height:1.2; letter-spacing:0.5px; text-transform:capitalize;">
+                    ${escHtml(candName).replace(/\s+/g, '<br>')}
+                </div>
+                <div style="font-size:18px; font-weight:700; color:#ffffff; margin-top:24px;">
+                    ${escHtml(gradeBand)}
+                </div>
+            </div>
+
+            <!-- MAIN CONTENT CONTAINER -->
+            <div style="flex:1; padding:24px 28px; display:grid; grid-template-columns: 220px 1fr; gap:24px; background:#ffffff; position:relative;">
+                
+                <!-- COLUMN 1: EXPERTISE & EDUCATION -->
+                <div style="font-size:11px;">
+                    <!-- AREAS OF EXPERTISE -->
+                    <div style="font-size:11px; font-weight:800; color:#0096c8; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">
+                        AREAS OF EXPERTISE
+                    </div>
+                    <ul style="margin:0 0 16px 0; padding-left:14px; list-style-type:disc; line-height:1.4;">
+                        ${kwListHtml}
+                    </ul>
+
+                    <!-- INDUSTRY EXPERTISE -->
+                    <div style="font-size:11px; font-weight:800; color:#0096c8; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">
+                        INDUSTRY EXPERTISE
+                    </div>
+                    <ul style="margin:0 0 16px 0; padding-left:14px; list-style-type:disc; line-height:1.4;">
+                        ${indListHtml}
+                    </ul>
+
+                    <!-- EDUCATION -->
+                    <div style="font-size:11px; font-weight:800; color:#0096c8; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">
+                        EDUCATION
+                    </div>
+                    <ul style="margin:0; padding-left:14px; list-style-type:disc; line-height:1.4;">
+                        ${edListHtml}
+                    </ul>
+                </div>
+
+                <!-- COLUMN 2: SUMMARY & PROJECTS -->
+                <div style="font-size:11.5px; padding-right:10px;">
+                    <!-- PROFESSIONAL EXPERIENCE -->
+                    <div style="font-size:11px; font-weight:800; color:#0096c8; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">
+                        PROFESSIONAL EXPERIENCE
+                    </div>
+                    <div style="color:#1e293b; line-height:1.55; margin-bottom:16px;">
+                        ${summaryHtml}
+                    </div>
+
+                    <!-- MAJOR PROJECTS -->
+                    <div style="font-size:11px; font-weight:800; color:#0096c8; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:8px;">
+                        MAJOR PROJECTS
+                    </div>
+                    <div>
+                        ${projHtml}
+                    </div>
+
+                    <!-- PROTIVITI LOGO BRANDING -->
+                    <div style="position:absolute; bottom:16px; right:24px; font-size:20px; font-weight:800; color:#0b3b60; font-family:Arial, sans-serif;">
+                        protiviti<span style="font-size:10px; vertical-align:super;">®</span>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    `;
+}
+
+async function downloadClientPptx() {
+    if (!currentClientProfileData) {
+        alert("No generated profile available to download.");
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/client-profile/download-pptx", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(currentClientProfileData),
+        });
+
+        if (!res.ok) {
+            let errDetail = "Download failed";
+            try {
+                const errData = await res.json();
+                errDetail = errData.detail || errDetail;
+            } catch (_) {}
+            alert("Error generating PowerPoint deck: " + errDetail);
+            return;
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const candName = currentClientProfileData.candidate_name || "Candidate Profile";
+        a.download = `${candName} CV.pptx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+    } catch (err) {
+        alert("Error downloading PowerPoint deck: " + err.message);
     }
 }
 
@@ -1076,6 +1553,29 @@ let activeQuestionsRole = null;
 let currentQuestionsTab = "pack";
 let refinedQuestionsPreviewList = [];
 
+let allQuestionBankRoles = [];
+
+// Filter sidebar roles in real-time
+function filterSidebarRoles(query) {
+    const listContainer = document.getElementById("sidebarRolesListGroup") || document.getElementById("rolesListGroup");
+    if (!listContainer) return;
+    
+    const q = (query || "").trim().toLowerCase();
+    const filtered = allQuestionBankRoles.filter(role => role.toLowerCase().includes(q));
+
+    if (filtered.length === 0) {
+        listContainer.innerHTML = '<div class="saved-jd-empty">No matching roles found</div>';
+        return;
+    }
+
+    listContainer.innerHTML = filtered.map(role => `
+        <div class="saved-jd-card role-list-item ${activeQuestionsRole === role ? 'active' : ''}" onclick="selectQuestionBankRole('${escHtml(role).replace(/'/g, "\\'")}')" style="display:flex; align-items:center; justify-content:space-between;">
+            <div class="saved-jd-card-title">${escHtml(role)}</div>
+            <span style="font-size:10px; font-weight:700; background:rgba(0,150,200,0.15); color:#0096c8; padding:2px 6px; border-radius:10px;">Bank</span>
+        </div>
+    `).join("");
+}
+
 // Load unique roles with banks
 async function loadQuestionBankRoles() {
     try {
@@ -1085,21 +1585,14 @@ async function loadQuestionBankRoles() {
         const listContainer = document.getElementById("sidebarRolesListGroup") || document.getElementById("rolesListGroup");
         if (!listContainer) return;
         
-        const roles = data.roles || [];
-        if (roles.length === 0) {
-            listContainer.innerHTML = '<div class="saved-jd-empty">No roles available.<br>Add one to begin.</div>';
-            return;
-        }
-        
-        listContainer.innerHTML = roles.map(role => `
-            <div class="saved-jd-card role-list-item ${activeQuestionsRole === role ? 'active' : ''}" onclick="selectQuestionBankRole('${escHtml(role).replace(/'/g, "\\'")}')">
-                <div class="saved-jd-card-title">${escHtml(role)}</div>
-            </div>
-        `).join("");
+        allQuestionBankRoles = data.roles || [];
+        const searchInput = document.getElementById("roleSearchInput");
+        const filterVal = searchInput ? searchInput.value : "";
+        filterSidebarRoles(filterVal);
 
         // Auto-select first role if none is active
-        if (!activeQuestionsRole && roles.length > 0) {
-            selectQuestionBankRole(roles[0]);
+        if (!activeQuestionsRole && allQuestionBankRoles.length > 0) {
+            selectQuestionBankRole(allQuestionBankRoles[0]);
         }
     } catch (err) {
         console.error("Failed to load roles", err);
@@ -1560,28 +2053,75 @@ async function deleteGenericQuestion(id) {
     }
 }
 
-// --- Drag & Drop for Feedback Excel ---
+// --- Drag & Drop Initialization ---
 document.addEventListener("DOMContentLoaded", function () {
-    const zone = document.getElementById("feedbackUploadZone");
-    if (!zone) return;
+    // Feedback Excel Zone
+    const feedbackZone = document.getElementById("feedbackUploadZone");
+    if (feedbackZone) {
+        feedbackZone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            feedbackZone.classList.add("dragover");
+        });
+        feedbackZone.addEventListener("dragleave", () => {
+            feedbackZone.classList.remove("dragover");
+        });
+        feedbackZone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            feedbackZone.classList.remove("dragover");
+            const file = e.dataTransfer.files[0];
+            if (file && (file.name.endsWith(".xlsx") || file.name.endsWith(".xls"))) {
+                _doFeedbackUpload(file);
+            } else {
+                alert("Please drop a valid .xlsx file.");
+            }
+        });
+    }
 
-    zone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        zone.classList.add("dragover");
-    });
-    zone.addEventListener("dragleave", () => {
-        zone.classList.remove("dragover");
-    });
-    zone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        zone.classList.remove("dragover");
-        const file = e.dataTransfer.files[0];
-        if (file && (file.name.endsWith(".xlsx") || file.name.endsWith(".xls"))) {
-            _doFeedbackUpload(file);
-        } else {
-            alert("Please drop a valid .xlsx file.");
-        }
-    });
+    // Client Profile CV Drop Zone
+    const clientCvZone = document.getElementById("clientCvUploadZone");
+    const clientCvInput = document.getElementById("clientCvFileInput");
+    if (clientCvZone && clientCvInput) {
+        clientCvZone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            clientCvZone.classList.add("dragover");
+        });
+        clientCvZone.addEventListener("dragleave", () => {
+            clientCvZone.classList.remove("dragover");
+        });
+        clientCvZone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            clientCvZone.classList.remove("dragover");
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                const dt = new DataTransfer();
+                dt.items.add(e.dataTransfer.files[0]);
+                clientCvInput.files = dt.files;
+                onClientCvFileSelected(clientCvInput);
+            }
+        });
+    }
+
+    // Client Profile JD Drop Zone
+    const clientJdZone = document.getElementById("clientJdUploadZone");
+    const clientJdInput = document.getElementById("clientJdFileInput");
+    if (clientJdZone && clientJdInput) {
+        clientJdZone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            clientJdZone.classList.add("dragover");
+        });
+        clientJdZone.addEventListener("dragleave", () => {
+            clientJdZone.classList.remove("dragover");
+        });
+        clientJdZone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            clientJdZone.classList.remove("dragover");
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                const dt = new DataTransfer();
+                dt.items.add(e.dataTransfer.files[0]);
+                clientJdInput.files = dt.files;
+                onClientJdFileSelected(clientJdInput);
+            }
+        });
+    }
 });
 
 // --- Upload Feedback Excel ---

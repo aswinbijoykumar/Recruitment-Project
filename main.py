@@ -17,17 +17,27 @@ from services.database       import (
     list_feedback_datasets, get_feedback_dataset, delete_feedback_dataset
 )
 from services.feedback_store import init_feedback_store, ingest_feedback_excel, query_rejection_trends, get_feedback_stats, clear_all_feedback
+from services.client_profile import generate_client_profile, build_client_pptx_deck
 
 load_dotenv()
 
+groq_api_key = os.getenv("GROQ_API_KEY")
 openrouter_key = os.getenv("openrouter") or os.getenv("OPENROUTER_API_KEY")
-if openrouter_key:
+
+if groq_api_key:
     groq_client = AsyncOpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=openrouter_key
+        base_url="https://api.groq.com/openai/v1",
+        api_key=groq_api_key
     )
 else:
     groq_client = AsyncGroq()
+
+openrouter_client = None
+if openrouter_key:
+    openrouter_client = AsyncOpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=openrouter_key
+    )
 
 
 @asynccontextmanager
@@ -35,6 +45,48 @@ async def lifespan(app: FastAPI):
     # Initialise databases on startup (guards against reloader lock conflicts)
     init_db()
     init_feedback_store()
+    
+    # Startup API checks
+    print("\n" + "="*50)
+    print("Startup API Checks:")
+    
+    # Check Groq Client connection
+    if groq_api_key:
+        print("✅ Groq Key detected.")
+        try:
+            # quick test call
+            res = await groq_client.chat.completions.create(
+                model="openai/gpt-oss-20b",
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=5
+            )
+            print("✅ Groq API (openai/gpt-oss-20b) connected successfully.")
+        except Exception as e:
+            print(f"❌ Groq API check failed: {e}")
+    else:
+        print("❌ No Groq API key found.")
+
+    # Check Dots3-note (OpenRouter) connection
+    if openrouter_key and openrouter_client:
+        print("✅ OpenRouter Key detected for Dots3-note.")
+        try:
+            res = await openrouter_client.chat.completions.create(
+                model="dots-studio/dots-3-note-preview:free",
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=5
+            )
+            print("✅ OpenRouter API (dots-studio/dots-3-note-preview:free) connected successfully.")
+        except Exception as e:
+            print(f"❌ OpenRouter API Dots3-note check failed: {e}")
+    else:
+        print("❌ No OpenRouter API key found for Dots3-note.")
+        
+    if groq_api_key:
+        print("✅ Groq API Key detected.")
+    else:
+        print("❌ No Groq API Key found.")
+        
+    print("="*50 + "\n")
     yield
 
 app = FastAPI(title="Protiviti HR Automation API", lifespan=lifespan)
@@ -428,6 +480,84 @@ async def api_question_bank_pack(role_id: str):
             "client_count": len(client_qs),
             "generic_count": len(generic_qs)
         })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+from typing import Optional
+
+# ── CLIENT PROFILE & PPTX GENERATOR ENDPOINTS ──────────────────────────────────
+@app.post("/api/client-profile/generate")
+async def api_generate_client_profile(
+    file: UploadFile = File(...),
+    jd_file: Optional[UploadFile] = File(None),
+    jd_text: Optional[str] = Form(None)
+):
+    try:
+        file_bytes = await file.read()
+        resume_text = extract_resume_text(file_bytes, file.filename)
+        if not resume_text or len(resume_text.strip()) < 30:
+            raise HTTPException(status_code=400, detail="Could not extract text from uploaded Candidate CV.")
+        
+        final_jd_text = ""
+
+        # Check if JD file was uploaded
+        if jd_file and jd_file.filename:
+            jd_bytes = await jd_file.read()
+            extracted_jd = extract_resume_text(jd_bytes, jd_file.filename)
+            if extracted_jd:
+                final_jd_text = extracted_jd
+
+        # Fallback or concatenate with pasted JD text if present
+        if jd_text and jd_text.strip():
+            if final_jd_text:
+                final_jd_text += "\n\n" + jd_text.strip()
+            else:
+                final_jd_text = jd_text.strip()
+
+        if not final_jd_text or len(final_jd_text.strip()) < 15:
+            raise HTTPException(status_code=400, detail="Please provide a Job Description (JD) by uploading a file (PDF, DOCX) or entering text.")
+
+        profile_data = await generate_client_profile(groq_client, resume_text, final_jd_text)
+        return JSONResponse(profile_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+from services.client_profile import generate_client_profile, build_client_pptx_deck, build_client_profile_html
+
+@app.post("/api/client-profile/download-pptx")
+async def api_download_client_pptx(payload: dict):
+    try:
+        import io
+        pptx_bytes = build_client_pptx_deck(payload)
+        cand_name = payload.get("candidate_name", "Candidate_Profile")
+        filename = f"{cand_name} CV.pptx"
+        
+        return StreamingResponse(
+            io.BytesIO(pptx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/client-profile/download-html")
+async def api_download_client_html(payload: dict):
+    try:
+        import io
+        html_content = build_client_profile_html(payload)
+        cand_name = payload.get("candidate_name", "Candidate_Profile").replace(" ", "_")
+        filename = f"Protiviti_Client_Profile_{cand_name}.html"
+        
+        return StreamingResponse(
+            io.BytesIO(html_content.encode("utf-8")),
+            media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

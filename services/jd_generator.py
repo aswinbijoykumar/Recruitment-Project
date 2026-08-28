@@ -7,8 +7,8 @@ from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
-PRIMARY_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-2-27b-it")
-GROQ_MODEL = "llama-3.1-8b-instant"
+PRIMARY_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b")
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 def _get_groq_fallback_client() -> AsyncOpenAI:
@@ -22,16 +22,112 @@ def _get_groq_fallback_client() -> AsyncOpenAI:
     )
 
 
+def _get_openrouter_client() -> AsyncOpenAI:
+    """Helper to initialize AsyncOpenAI pointing to OpenRouter API using openrouter API Key."""
+    key = os.getenv("openrouter") or os.getenv("OPENROUTER_API_KEY")
+    if not key:
+        raise RuntimeError("OpenRouter API key not found in environment.")
+    return AsyncOpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=key
+    )
+
+
+async def call_resume_llm_with_fallback(
+    messages: list[dict],
+    response_format: dict = None,
+    temperature: float = 0.2,
+    max_tokens: int = 2500
+) -> str:
+    """
+    Tries MoonshotAI: Kimi K2.6 on OpenRouter first.
+    If that fails, falls back to openai/gpt-oss-20b on Groq.
+    If that also fails, falls back to openai/gpt-oss-120b on Groq.
+    """
+    # 1. Primary: Dots3-note via OpenRouter
+    try:
+        or_client = _get_openrouter_client()
+        kwargs = {
+            "model": "dots-studio/dots-3-note-preview:free",
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
+        }
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        completion = await or_client.chat.completions.create(**kwargs)
+        content = completion.choices[0].message.content if completion.choices else None
+        finish_reason = completion.choices[0].finish_reason if completion.choices else "unknown"
+        if content and content.strip():
+            print(f"[Resume LLM] Dots3-note succeeded, finish_reason={finish_reason}, content_length={len(content)}")
+            return content
+    except Exception as kimi_err:
+        print(f"[Resume LLM Failover] Dots3-note failed: {kimi_err}. Falling back to GPT-OSS-20b...")
+
+    # 2. Fallback: GPT-OSS-20b via Groq
+    try:
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if not groq_api_key:
+            raise RuntimeError("GROQ_API_KEY not found.")
+        groq_client = AsyncOpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=groq_api_key
+        )
+        kwargs = {
+            "model": "openai/gpt-oss-20b",
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
+        }
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        completion = await groq_client.chat.completions.create(**kwargs)
+        content = completion.choices[0].message.content if completion.choices else None
+        if content and content.strip():
+            print(f"[Resume LLM Failover] GPT-OSS-20b succeeded, content_length={len(content)}")
+            return content
+    except Exception as gpt_err:
+        print(f"[Resume LLM Failover] GPT-OSS-20b failed: {gpt_err}. Falling back to GPT-OSS-120b...")
+
+    # 3. Last Resort Fallback: GPT-OSS-120b via Groq
+    try:
+        fallback_client = _get_groq_fallback_client()
+        kwargs = {
+            "model": "openai/gpt-oss-120b",
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
+        }
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        completion = await fallback_client.chat.completions.create(**kwargs)
+        content = completion.choices[0].message.content if completion.choices else None
+        if content and content.strip():
+            print(f"[Resume LLM Fallover] GPT-OSS-120b succeeded, content_length={len(content)}")
+            return content
+        raise ValueError("All fallback models returned empty content.")
+    except Exception as final_err:
+        print(f"[Resume LLM Failover] All models failed. Final error: {final_err}")
+        raise final_err
+
+
 async def call_llm_with_fallback(
     client: AsyncOpenAI,
     messages: list[dict],
     response_format: dict = None,
-    temperature: float = 0.3
+    temperature: float = 0.3,
+    max_tokens: int = 2500
 ) -> str:
     """
     Tries primary OpenRouter model first.
     If OpenRouter fails (404 model unavailable, 429 rate limit, network error),
-    fails over directly to Groq Llama 8B Instant (llama-3.1-8b-instant) using GROQ_API_KEY.
+    fails over directly to Groq using GROQ_API_KEY.
     """
     # 1. Primary Attempt: OpenRouter
     try:
@@ -39,29 +135,48 @@ async def call_llm_with_fallback(
             "model": PRIMARY_MODEL,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
         }
         if response_format:
             kwargs["response_format"] = response_format
 
         completion = await client.chat.completions.create(**kwargs)
-        return completion.choices[0].message.content
+        content = completion.choices[0].message.content if completion.choices else None
+        finish_reason = completion.choices[0].finish_reason if completion.choices else "unknown"
+        print(f"[LLM] OpenRouter finish_reason={finish_reason}, content_length={len(content) if content else 0}")
+        
+        if content and content.strip():
+            return content
+
+        print(f"[LLM Failover] OpenRouter returned empty content (finish_reason={finish_reason}). Falling back to Groq...")
 
     except Exception as primary_err:
         print(f"[LLM Failover] Primary OpenRouter model '{PRIMARY_MODEL}' failed ({primary_err}). Failsafe over to Groq {GROQ_MODEL}...")
 
-    # 2. Backup Failover: Groq Llama 8B Instant
+    # 2. Backup Failover: Groq
     try:
         groq_client = _get_groq_fallback_client()
         kwargs = {
             "model": GROQ_MODEL,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
         }
         if response_format:
             kwargs["response_format"] = response_format
 
         completion = await groq_client.chat.completions.create(**kwargs)
-        return completion.choices[0].message.content
+        content = completion.choices[0].message.content if completion.choices else None
+        finish_reason = completion.choices[0].finish_reason if completion.choices else "unknown"
+        print(f"[LLM] Groq finish_reason={finish_reason}, content_length={len(content) if content else 0}")
+        print(f"[LLM Debug] Groq content: {content}")
+        
+        if content and content.strip():
+            return content
+
+        raise ValueError(f"Groq returned empty content (finish_reason={finish_reason}). The model may be overloaded — please try again in a few seconds.")
 
     except Exception as groq_err:
         print(f"[LLM Failover] Groq backup model '{GROQ_MODEL}' failed: {groq_err}")
@@ -69,7 +184,7 @@ async def call_llm_with_fallback(
 
 
 # 1. UPDATED SYSTEM PROMPT: Explicitly banned markdown and emojis
-JD_SYSTEM_PROMPT = """You are an expert HR and Technical Recruiter working at Protiviti, a global professional services firm.
+JD_SYSTEM_PROMPT = """You are an expert HR and Technical Recruiter.
 Your sole task is to generate professional, well-structured Job Descriptions (JDs) based on client demands.
 
 When the user gives you demands, immediately output a JD with these sections:
@@ -78,15 +193,15 @@ When the user gives you demands, immediately output a JD with these sections:
 3. Key Responsibilities (use simple hyphens '-' for bullet points)
 4. Required Skills & Qualifications (must-haves vs nice-to-haves)
 5. Preferred Experience
-6. About Protiviti (brief standard closing paragraph)
 
 CRITICAL RULES:
 - Write in standard, plain text English. 
 - DO NOT use any markdown formatting like hashtags (#) for headers or asterisks (*) for bold text.
 - DO NOT use emojis.
+- DO NOT include any 'About Protiviti' or other company description at the end.
 - Keep the tone professional, attractive to candidates, and highly organized."""
 
-RESUME_ANALYSIS_PROMPT = """You are a senior HR analyst and talent acquisition expert at Protiviti.
+RESUME_ANALYSIS_PROMPT = """You are a senior HR analyst and talent acquisition expert .
 
 Analyze the resume against the job description and produce a structured match report.
 
@@ -157,26 +272,43 @@ async def stream_jd_generation(client: AsyncOpenAI, demands: str):
                 yield cleaned_token
 
 async def stream_resume_analysis(client: AsyncOpenAI, jd_text: str, resume_text: str):
-    """Async generator to yield Resume Analysis tokens with failover to Groq Llama 8B Instant."""
+    """Async generator to yield Resume Analysis tokens using Dots3-note with fallback to GPT-OSS."""
     user_message = f"--- JOB DESCRIPTION ---\n{jd_text}\n\n--- CANDIDATE RESUME ---\n{resume_text}"
     messages = [
         {"role": "system", "content": RESUME_ANALYSIS_PROMPT},
         {"role": "user",   "content": user_message}
     ]
     try:
-        stream = await client.chat.completions.create(
-            model=PRIMARY_MODEL,
+        or_client = _get_openrouter_client()
+        stream = await or_client.chat.completions.create(
+            model="dots-studio/dots-3-note-preview:free",
             messages=messages,
             stream=True,
         )
+        print("[Resume Stream] Streaming using Dots3-note...")
     except Exception as err:
-        print(f"[LLM Stream Failover] Primary stream ({PRIMARY_MODEL}) failed: {err}. Failing over to Groq {GROQ_MODEL}...")
-        groq_client = _get_groq_fallback_client()
-        stream = await groq_client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
-            stream=True,
-        )
+        print(f"[Resume Stream Failover] Dots3-note stream failed: {err}. Failing over to Groq GPT-OSS...")
+        try:
+            groq_api_key = os.getenv("GROQ_API_KEY")
+            groq_client = AsyncOpenAI(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=groq_api_key
+            )
+            stream = await groq_client.chat.completions.create(
+                model="openai/gpt-oss-20b",
+                messages=messages,
+                stream=True,
+            )
+            print("[Resume Stream Failover] Streaming using GPT-OSS-20b...")
+        except Exception as err2:
+            print(f"[Resume Stream Failover] GPT-OSS-20b stream failed: {err2}. Failing over to GPT-OSS-120b...")
+            groq_client = _get_groq_fallback_client()
+            stream = await groq_client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=messages,
+                stream=True,
+            )
+            print("[Resume Stream Failover] Streaming using GPT-OSS-120b...")
 
     async for chunk in stream:
         token = chunk.choices[0].delta.content
@@ -230,7 +362,7 @@ You must return a JSON object with the following fields:
 }
 Do not use markdown headers, asterisks, emojis or symbols. The keys must match exactly. Return ONLY valid JSON."""
 
-RESUME_RERANK_JSON_PROMPT = """You are a senior recruitment leader and SME in Banking & Finance at Protiviti.
+RESUME_RERANK_JSON_PROMPT = """You are a senior recruitment leader and SME in Banking & Finance.
 You are given a Job Description (JD) and a summary of evaluations for multiple candidate resumes.
 Your task is to critically rank the candidates from best to worst based on their fit for the JD.
 
@@ -267,8 +399,7 @@ async def analyze_single_resume(client: AsyncOpenAI, jd_text: str, resume_name: 
     """Analyze a single resume and return structured JSON."""
     user_msg = f"--- JOB DESCRIPTION ---\n{jd_text}\n\n--- CANDIDATE RESUME ({resume_name}) ---\n{resume_text}"
     try:
-        result_text = await call_llm_with_fallback(
-            client=client,
+        result_text = await call_resume_llm_with_fallback(
             messages=[
                 {"role": "system", "content": RESUME_ANALYSIS_JSON_PROMPT},
                 {"role": "user",   "content": user_msg}
@@ -302,8 +433,7 @@ async def rank_candidates(client: AsyncOpenAI, jd_text: str, candidates_summary:
     """Generate final ranking leaderboard for all candidates."""
     user_msg = f"--- JOB DESCRIPTION ---\n{jd_text}\n\n--- CANDIDATE EVALUATION SUMMARIES ---\n{candidates_summary}"
     try:
-        result_text = await call_llm_with_fallback(
-            client=client,
+        result_text = await call_resume_llm_with_fallback(
             messages=[
                 {"role": "system", "content": RESUME_RERANK_JSON_PROMPT},
                 {"role": "user",   "content": user_msg}
@@ -312,7 +442,26 @@ async def rank_candidates(client: AsyncOpenAI, jd_text: str, candidates_summary:
             temperature=0.2
         )
         data = json.loads(result_text)
-        return data.get("ranking", [])
+        raw_ranking = data.get("ranking", [])
+        
+        normalized_ranking = []
+        for item in raw_ranking:
+            # Fallback mappings for keys that vary between different models
+            name = item.get("candidate_name") or item.get("name") or item.get("candidate") or "Unknown Candidate"
+            score = item.get("score") or item.get("match_score") or 0
+            verdict = item.get("verdict") or "Unknown"
+            justification = item.get("justification") or ""
+            rank_num = item.get("rank") or (len(normalized_ranking) + 1)
+            
+            normalized_ranking.append({
+                "rank": rank_num,
+                "candidate_name": name,
+                "score": score,
+                "verdict": verdict,
+                "justification": justification,
+                "contact_info": item.get("contact_info", {})
+            })
+        return normalized_ranking
     except Exception as e:
         return []
 
@@ -357,7 +506,7 @@ async def analyze_and_rank_batch(client: AsyncOpenAI, jd_text: str, resumes: lis
 
 # ── Rejection Trends Synthesis ────────────────────────────────────────────────
 
-REJECTION_TRENDS_PROMPT = """You are a senior HR analytics expert at Protiviti.
+REJECTION_TRENDS_PROMPT = """You are a senior HR analytics expert .
 
 You are given multiple pieces of negative client feedback for candidates who were rejected for a specific role.
 Your task is to analyze ALL the feedback entries together and identify the COMMON patterns — what were the recurring gaps and weaknesses across these rejected candidates?
