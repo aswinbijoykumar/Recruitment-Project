@@ -1326,11 +1326,6 @@ async function generateClientProfile() {
     const hasJdFile = jdFileInput && jdFileInput.files && jdFileInput.files.length > 0;
     const jdText = jdInput ? jdInput.value.trim() : "";
 
-    if (!hasJdFile && !jdText) {
-        alert("Please provide the target Job Description (JD) by uploading a file (PDF, DOCX) or entering text.");
-        return;
-    }
-
     btn.disabled = true;
     btn.innerHTML = `<div class="upload-progress-spinner" style="width:16px;height:16px;"></div> Generating Client Submission Profile...`;
 
@@ -1540,6 +1535,7 @@ async function downloadClientPptx() {
 
 function uploadFeedbackExcelFromSidebar(inputEl) {
     if (!inputEl || !inputEl.files || inputEl.files.length === 0) return;
+    if (typeof switchMode === 'function') switchMode('intelligence');
     _doFeedbackUpload(inputEl.files[0]);
     inputEl.value = "";
 }
@@ -2146,19 +2142,26 @@ async function _doFeedbackUpload(file) {
 
     try {
         const res = await fetch("/api/upload-feedback", { method: "POST", body: formData });
-        const data = await res.json();
+        
+        let data;
+        const text = await res.text();
+        try {
+            data = JSON.parse(text);
+        } catch (_) {
+            data = { detail: text || `Server error (${res.status})` };
+        }
 
         if (!res.ok) {
             resultEl.innerHTML = `
                 <div class="upload-result-error">
-                    <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><line x1=\"15\" y1=\"9\" x2=\"9\" y2=\"15\"/><line x1=\"9\" y1=\"9\" x2=\"15\" y2=\"15\"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                     <span>${escHtml(data.detail || "Upload failed")}</span>
                 </div>
             `;
             return;
         }
 
-        const rolesHtml = data.roles_found.map(r => `<span class="intel-role-tag">${escHtml(r)}</span>`).join("");
+        const rolesHtml = (data.roles_found || []).map(r => `<span class="intel-role-tag">${escHtml(r)}</span>`).join("");
         resultEl.innerHTML = `
             <div class="upload-result-success">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -2175,16 +2178,17 @@ async function _doFeedbackUpload(file) {
         await loadSavedDatasets();
 
     } catch (err) {
+        console.error("Upload error:", err);
         resultEl.innerHTML = `
             <div class="upload-result-error">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                <span>Network error: ${escHtml(err.message)}</span>
+                <span>Upload error: ${escHtml(err.message)}</span>
             </div>
         `;
+    } finally {
+        const fileInput = document.getElementById("feedbackFileInput");
+        if (fileInput) fileInput.value = "";
     }
-
-    // Reset file input
-    document.getElementById("feedbackFileInput").value = "";
 }
 
 // --- Load Feedback Stats & Role Badges ---

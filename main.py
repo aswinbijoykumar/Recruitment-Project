@@ -91,6 +91,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Protiviti HR Automation API", lifespan=lifespan)
 
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 
 # ── Data Models ───────────────────────────────────────────────────────────────
@@ -512,11 +521,9 @@ async def api_generate_client_profile(
         if jd_text and jd_text.strip():
             if final_jd_text:
                 final_jd_text += "\n\n" + jd_text.strip()
-            else:
-                final_jd_text = jd_text.strip()
-
-        if not final_jd_text or len(final_jd_text.strip()) < 15:
-            raise HTTPException(status_code=400, detail="Please provide a Job Description (JD) by uploading a file (PDF, DOCX) or entering text.")
+        # JD is now optional for client profile generation
+        if not final_jd_text:
+            final_jd_text = ""
 
         profile_data = await generate_client_profile(groq_client, resume_text, final_jd_text)
         return JSONResponse(profile_data)

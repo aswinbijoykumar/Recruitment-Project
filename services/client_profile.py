@@ -173,9 +173,10 @@ async def generate_client_profile(client: AsyncOpenAI, resume_text: str, jd_text
     # Truncate prompt context if CV or JD is excessively long to protect TPM limits
     safe_resume = resume_text[:12000] if resume_text else ""
     safe_jd = jd_text[:5000] if jd_text else ""
+    jd_header = f"--- JOB DESCRIPTION (JD) ---\n{safe_jd}" if safe_jd.strip() else "--- JOB DESCRIPTION (JD) ---\nNo specific Job Description provided. Extract and format the profile purely from the Candidate CV."
 
     user_msg = (
-        f"--- JOB DESCRIPTION (JD) ---\n{safe_jd}\n\n"
+        f"{jd_header}\n\n"
         f"--- CANDIDATE CV ---\n{safe_resume}"
     )
 
