@@ -233,12 +233,25 @@ Rules:
 - Be honest, specific, and reference actual content from both documents."""
 
 def clean_token(token: str) -> str:
-    """Removes asterisks, hashtags, and emojis from text tokens."""
-    # Remove asterisks and hashtags
+    """Removes asterisks, hashtags, and emojis from text tokens while preserving hyphens and punctuation."""
+    # Remove asterisks and hashtags (markdown headers/bold)
     token = token.replace("*", "").replace("#", "")
     
-    # Regex pattern to remove emojis / extended unicode symbols
-    emoji_pattern = re.compile(r'[^\x00-\x7F]|\u2022') # Removes non-ASCII characters and standard bullet points if they creep in
+    # Normalize unicode hyphens/dashes (en-dash, em-dash, figure dash, minus) to standard ASCII '-'
+    token = re.sub(r'[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]', '-', token)
+    
+    # Normalize unicode quotation marks to standard ASCII quotes
+    token = re.sub(r'[\u2018\u2019]', "'", token)
+    token = re.sub(r'[\u201C\u201D]', '"', token)
+    
+    # Normalize unicode bullet symbols to standard ASCII '-'
+    token = re.sub(r'[\u2022\u2023\u25E6\u2043\u2219]', '-', token)
+    
+    # Remove emojis and miscellaneous decorative symbols without stripping standard text/punctuation
+    emoji_pattern = re.compile(
+        r'[\U00010000-\U0010ffff]|[\u2600-\u27bf]|[\u2300-\u23ff]|[\u2b50-\u2b55]',
+        flags=re.UNICODE
+    )
     token = emoji_pattern.sub('', token)
     
     return token
